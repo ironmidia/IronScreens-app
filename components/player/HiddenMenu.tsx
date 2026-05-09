@@ -9,13 +9,13 @@ import {
   Dimensions,
   Alert,
   Platform,
-  StatusBar,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Colors, Typography, Spacing, Radius } from '@/constants/theme';
+import { Colors, Typography, Spacing, Radius, Shadows } from '@/constants/theme';
 import { APP_VERSION } from '@/constants/config';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 interface HiddenMenuProps {
   visible: boolean;
@@ -54,9 +54,7 @@ function HiddenMenu({
 
   const handleReload = useCallback(() => {
     onClose();
-    setTimeout(() => {
-      onReload();
-    }, 200);
+    setTimeout(() => onReload(), 200);
   }, [onClose, onReload]);
 
   return (
@@ -69,9 +67,14 @@ function HiddenMenu({
     >
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.card} onPress={() => {}}>
-          {/* Header */}
+
+          {/* Header — Logo + fechar */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Iron Screens</Text>
+            <Image
+              source={require('@/assets/images/Logo_menor_branco.png')}
+              style={styles.logo}
+              contentFit="contain"
+            />
             <Pressable onPress={onClose} hitSlop={12}>
               <MaterialIcons name="close" size={22} color={Colors.TextSecondary} />
             </Pressable>
@@ -112,7 +115,6 @@ function HiddenMenu({
 
           <View style={styles.divider} />
 
-          {/* Version */}
           <Text style={styles.version}>Versão {APP_VERSION}</Text>
         </Pressable>
       </Pressable>
@@ -129,17 +131,12 @@ const styles = StyleSheet.create({
   },
   card: {
     width: Math.min(width * 0.85, 360),
-    backgroundColor: Colors.SurfaceElevated,
+    backgroundColor: Colors.Surface4,
     borderRadius: Radius.lg,
     padding: Spacing.lg,
     borderWidth: 1,
-    borderColor: Colors.Border,
-    // Shadows
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 16,
-    elevation: 20,
+    borderColor: Colors.SurfaceElevated,
+    ...Shadows.card,
   },
   header: {
     flexDirection: 'row',
@@ -147,11 +144,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.md,
   },
-  headerTitle: {
-    color: Colors.TextPrimary,
-    fontSize: Typography.sizes.md,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 0.5,
+  logo: {
+    height: 28,
+    width: 120,
   },
   infoRow: {
     flexDirection: 'row',
@@ -159,9 +154,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingVertical: Spacing.sm,
   },
-  infoText: {
-    flex: 1,
-  },
+  infoText: { flex: 1 },
   infoLabel: {
     color: Colors.TextMuted,
     fontSize: Typography.sizes.xs,
@@ -177,11 +170,11 @@ const styles = StyleSheet.create({
     color: Colors.TextMuted,
     fontSize: Typography.sizes.xs,
     marginTop: 2,
-    fontFamily: 'monospace',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
   divider: {
     height: 1,
-    backgroundColor: Colors.Border,
+    backgroundColor: Colors.SurfaceElevated,
     marginVertical: Spacing.sm,
   },
   menuItem: {
@@ -201,7 +194,7 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
   },
   version: {
-    color: Colors.TextMuted,
+    color: Colors.TextFaint,
     fontSize: Typography.sizes.xs,
     textAlign: 'center',
     marginTop: Spacing.xs,

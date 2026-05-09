@@ -10,12 +10,11 @@ function EmptyScreen() {
   return (
     <View style={styles.container}>
       <Image
-        source={require('@/assets/images/iron-screens-logo.png')}
+        source={require('@/assets/images/Logo_menor_branco.png')}
         style={styles.logo}
         contentFit="contain"
         transition={300}
       />
-      <Text style={styles.title}>Iron Screens</Text>
       <Text style={styles.subtitle}>Aguardando conteúdo agendado...</Text>
       <View style={styles.dot} />
     </View>
@@ -31,17 +30,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    width: 120,
-    height: 120,
+    width: 200,
+    height: 80,
     marginBottom: Spacing.lg,
-    opacity: 0.7,
-  },
-  title: {
-    color: Colors.TextPrimary,
-    fontSize: Typography.sizes.xl,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 2,
-    opacity: 0.8,
+    opacity: 0.75,
   },
   subtitle: {
     color: Colors.TextMuted,

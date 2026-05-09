@@ -1,4 +1,4 @@
-// Iron Screens — WebView Renderer (YouTube / External Link / Instagram)
+// Iron Screens — WebView Renderer (Native: iOS / Android)
 import React, { memo } from 'react';
 import { StyleSheet, Dimensions, View } from 'react-native';
 import { WebView } from 'react-native-webview';

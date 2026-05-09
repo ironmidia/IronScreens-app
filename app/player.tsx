@@ -7,25 +7,24 @@ import {
   Pressable,
   ActivityIndicator,
   Text,
-  AppState,
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useKeepAwake } from 'expo-keep-awake';
+import useKeepAwake from '@/hooks/useKeepAwake';
 import { loadTerminal, clearTerminal } from '@/services/storageService';
 import { usePlayer } from '@/hooks/usePlayer';
+import { useFooterBar } from '@/hooks/useFooterBar';
 import MediaRenderer from '@/components/media/MediaRenderer';
 import EmptyScreen from '@/components/player/EmptyScreen';
 import HiddenMenu from '@/components/player/HiddenMenu';
 import ConnectionBanner from '@/components/player/ConnectionBanner';
 import CrossfadeView from '@/components/player/CrossfadeView';
+import FooterBar, { BAR_HEIGHT } from '@/components/player/FooterBar';
 import { Colors, Typography, Spacing } from '@/constants/theme';
 import { LONG_PRESS_DURATION_MS, RECONNECT_INTERVAL_MS } from '@/constants/config';
 
-const { width, height } = Dimensions.get('window');
-
 export default function PlayerScreen() {
-  useKeepAwake(); // Keep screen on
+  useKeepAwake();
 
   const router = useRouter();
   const [terminalId, setTerminalId] = useState<string | null>(null);
@@ -34,21 +33,17 @@ export default function PlayerScreen() {
   const [menuVisible, setMenuVisible] = useState(false);
   const [ready, setReady] = useState(false);
 
-  // Long press detection
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pressStartRef = useRef(0);
-
-  // Timer for advancing non-video media
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load saved terminal on mount
+  // Footer bar config (null = desativado)
+  const footerConfig = useFooterBar();
+  const footerHeight = footerConfig ? BAR_HEIGHT : 0;
+
   useEffect(() => {
     async function init() {
       const { terminalId: tid, orientation, name } = await loadTerminal();
-      if (!tid) {
-        router.replace('/setup');
-        return;
-      }
+      if (!tid) { router.replace('/setup'); return; }
       setTerminalId(tid);
       setTerminalOrientation(orientation || 'horizontal');
       setTerminalName(name);
@@ -57,72 +52,39 @@ export default function PlayerScreen() {
     init();
   }, [router]);
 
-  // Player hook — only when ready
-  const [playerState, playerActions] = usePlayer(
-    terminalId || '',
-    terminalOrientation
-  );
+  const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
+  const { currentItem, loading, hasNoScheduledMedia, isConnected } = playerState;
 
-  const { currentItem, loading, error, hasNoScheduledMedia, isConnected } = playerState;
-
-  // ─── Auto-advance timer for images, WebViews, and programmatic ───
   useEffect(() => {
     if (!currentItem) return;
-    if (currentItem.media.type === 'video') return; // video uses onEnd callback
-
-    // Clear any previous timer
-    if (advanceTimerRef.current) {
-      clearTimeout(advanceTimerRef.current);
-    }
-
+    if (currentItem.media.type === 'video') return;
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
     const durationMs = (currentItem.durationSec || 10) * 1000;
-    advanceTimerRef.current = setTimeout(() => {
-      playerActions.advance();
-    }, durationMs);
-
-    return () => {
-      if (advanceTimerRef.current) {
-        clearTimeout(advanceTimerRef.current);
-      }
-    };
+    advanceTimerRef.current = setTimeout(() => { playerActions.advance(); }, durationMs);
+    return () => { if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current); };
   }, [currentItem?.media.id, currentItem?.durationSec]);
 
-  // Re-check schedule every minute when in "no scheduled media" state
   useEffect(() => {
     if (!hasNoScheduledMedia) return;
-    const interval = setInterval(() => {
-      playerActions.reload();
-    }, RECONNECT_INTERVAL_MS);
+    const interval = setInterval(() => { playerActions.reload(); }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [hasNoScheduledMedia]);
 
-  // Reconnect polling when offline
   useEffect(() => {
     if (isConnected) return;
-    const interval = setInterval(() => {
-      if (terminalId) playerActions.reload();
-    }, RECONNECT_INTERVAL_MS);
+    const interval = setInterval(() => { if (terminalId) playerActions.reload(); }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isConnected, terminalId]);
 
-  // Long press handlers
   const handlePressIn = useCallback(() => {
-    pressStartRef.current = Date.now();
-    longPressTimerRef.current = setTimeout(() => {
-      setMenuVisible(true);
-    }, LONG_PRESS_DURATION_MS);
+    longPressTimerRef.current = setTimeout(() => { setMenuVisible(true); }, LONG_PRESS_DURATION_MS);
   }, []);
 
   const handlePressOut = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
+    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
   }, []);
 
-  const handleVideoEnd = useCallback(() => {
-    playerActions.advance();
-  }, [playerActions.advance]);
+  const handleVideoEnd = useCallback(() => { playerActions.advance(); }, [playerActions.advance]);
 
   const handleChangeTerminal = useCallback(async () => {
     setMenuVisible(false);
@@ -136,11 +98,7 @@ export default function PlayerScreen() {
   }, [playerActions.reload]);
 
   if (!ready || !terminalId) {
-    return (
-      <View style={styles.black}>
-        <ActivityIndicator color={Colors.Primary} size="large" />
-      </View>
-    );
+    return <View style={styles.black}><ActivityIndicator color={Colors.Primary} size="large" /></View>;
   }
 
   if (loading) {
@@ -154,30 +112,36 @@ export default function PlayerScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Long press touch zone */}
-      <Pressable
-        style={styles.touchZone}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        delayLongPress={LONG_PRESS_DURATION_MS}
-      >
-        {/* Player content */}
+      {/*
+        Mídia ocupa toda a tela (absoluteFill).
+        O footer flutua por cima com position absolute na base.
+        O touchZone cobre apenas a área acima do footer para evitar
+        ativar o menu escondido ao tocar no rodépé.
+      */}
+      <View style={StyleSheet.absoluteFill}>
         {hasNoScheduledMedia || !currentItem ? (
           <EmptyScreen />
         ) : (
           <CrossfadeView triggerKey={currentItem.media.id + currentItem.playlistItemId}>
-            <MediaRenderer
-              media={currentItem.media}
-              onVideoEnd={handleVideoEnd}
-            />
+            <MediaRenderer media={currentItem.media} onVideoEnd={handleVideoEnd} />
           </CrossfadeView>
         )}
-      </Pressable>
+      </View>
 
-      {/* Connection Banner */}
+      {/* Touch zone cobre a tela toda menos o footer */}
+      <Pressable
+        style={[styles.touchZone, { bottom: footerHeight }]}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        delayLongPress={LONG_PRESS_DURATION_MS}
+      />
+
+      {/* Nota de Rodapé — flutuante na base, por cima da mídia */}
+      {footerConfig && <FooterBar config={footerConfig} />}
+
+      {/* Connection Banner (flutuante, acima de tudo) */}
       <ConnectionBanner visible={!isConnected} />
 
-      {/* Hidden Menu */}
       <HiddenMenu
         visible={menuVisible}
         terminalName={terminalName}
@@ -193,8 +157,6 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    width,
-    height,
     backgroundColor: '#000',
   },
   black: {
@@ -204,10 +166,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.md,
   },
+  // Cobre toda a área acima do footer, captura o long press
   touchZone: {
-    flex: 1,
-    width,
-    height,
+    ...StyleSheet.absoluteFillObject,
+    bottom: 0, // sobrescrito inline com footerHeight
   },
   loadingText: {
     color: Colors.TextMuted,
