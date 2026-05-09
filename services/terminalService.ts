@@ -1,31 +1,28 @@
 // Iron Screens — Terminal Service
 import { supabase } from './supabase';
-import { Terminal } from './models';
 
-export async function fetchTerminals(): Promise<Terminal[]> {
-  const { data, error } = await supabase
-    .from('terminals')
-    .select('id, name, type, orientation, status, device_id, client, location, setup_pin, created_at, updated_at')
-    .order('name', { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Terminal[];
-}
-
+/** Marca o terminal como online E atualiza last_heartbeat */
 export async function setTerminalOnline(terminalId: string): Promise<void> {
+  const now = new Date().toISOString();
   const { error } = await supabase
     .from('terminals')
-    .update({ status: 'online', updated_at: new Date().toISOString() })
+    .update({
+      status: 'online',
+      last_heartbeat: now,
+      updated_at: now,
+    })
     .eq('id', terminalId);
-
-  if (error) throw new Error(error.message);
+  if (error) throw error;
 }
 
+/** Marca o terminal como offline (sem alterar last_heartbeat) */
 export async function setTerminalOffline(terminalId: string): Promise<void> {
   const { error } = await supabase
     .from('terminals')
-    .update({ status: 'offline', updated_at: new Date().toISOString() })
+    .update({
+      status: 'offline',
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', terminalId);
-
-  if (error) throw new Error(error.message);
+  if (error) throw error;
 }

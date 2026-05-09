@@ -7,25 +7,26 @@ import {
   Pressable,
   ActivityIndicator,
   Text,
-  AppState,
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import useKeepAwake from '@/hooks/useKeepAwake';
 import { loadTerminal, clearTerminal } from '@/services/storageService';
 import { usePlayer } from '@/hooks/usePlayer';
+import { useFooterBar } from '@/hooks/useFooterBar';
 import MediaRenderer from '@/components/media/MediaRenderer';
 import EmptyScreen from '@/components/player/EmptyScreen';
 import HiddenMenu from '@/components/player/HiddenMenu';
 import ConnectionBanner from '@/components/player/ConnectionBanner';
 import CrossfadeView from '@/components/player/CrossfadeView';
+import FooterBar, { BAR_HEIGHT } from '@/components/player/FooterBar';
 import { Colors, Typography, Spacing } from '@/constants/theme';
 import { LONG_PRESS_DURATION_MS, RECONNECT_INTERVAL_MS } from '@/constants/config';
 
 const { width, height } = Dimensions.get('window');
 
 export default function PlayerScreen() {
-  useKeepAwake(); // Keep screen on
+  useKeepAwake();
 
   const router = useRouter();
   const [terminalId, setTerminalId] = useState<string | null>(null);
@@ -34,21 +35,18 @@ export default function PlayerScreen() {
   const [menuVisible, setMenuVisible] = useState(false);
   const [ready, setReady] = useState(false);
 
-  // Long press detection
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pressStartRef = useRef(0);
-
-  // Timer for advancing non-video media
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Footer bar config (null = desativado)
+  const footerConfig = useFooterBar();
+  const footerHeight = footerConfig ? BAR_HEIGHT : 0;
 
   // Load saved terminal on mount
   useEffect(() => {
     async function init() {
       const { terminalId: tid, orientation, name } = await loadTerminal();
-      if (!tid) {
-        router.replace('/setup');
-        return;
-      }
+      if (!tid) { router.replace('/setup'); return; }
       setTerminalId(tid);
       setTerminalOrientation(orientation || 'horizontal');
       setTerminalName(name);
@@ -57,72 +55,40 @@ export default function PlayerScreen() {
     init();
   }, [router]);
 
-  // Player hook — only when ready
-  const [playerState, playerActions] = usePlayer(
-    terminalId || '',
-    terminalOrientation
-  );
+  const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
+  const { currentItem, loading, hasNoScheduledMedia, isConnected } = playerState;
 
-  const { currentItem, loading, error, hasNoScheduledMedia, isConnected } = playerState;
-
-  // ─── Auto-advance timer for images, WebViews, and programmatic ───
+  // Auto-advance timer para não-vídeos
   useEffect(() => {
     if (!currentItem) return;
-    if (currentItem.media.type === 'video') return; // video uses onEnd callback
-
-    // Clear any previous timer
-    if (advanceTimerRef.current) {
-      clearTimeout(advanceTimerRef.current);
-    }
-
+    if (currentItem.media.type === 'video') return;
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
     const durationMs = (currentItem.durationSec || 10) * 1000;
-    advanceTimerRef.current = setTimeout(() => {
-      playerActions.advance();
-    }, durationMs);
-
-    return () => {
-      if (advanceTimerRef.current) {
-        clearTimeout(advanceTimerRef.current);
-      }
-    };
+    advanceTimerRef.current = setTimeout(() => { playerActions.advance(); }, durationMs);
+    return () => { if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current); };
   }, [currentItem?.media.id, currentItem?.durationSec]);
 
-  // Re-check schedule every minute when in "no scheduled media" state
   useEffect(() => {
     if (!hasNoScheduledMedia) return;
-    const interval = setInterval(() => {
-      playerActions.reload();
-    }, RECONNECT_INTERVAL_MS);
+    const interval = setInterval(() => { playerActions.reload(); }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [hasNoScheduledMedia]);
 
-  // Reconnect polling when offline
   useEffect(() => {
     if (isConnected) return;
-    const interval = setInterval(() => {
-      if (terminalId) playerActions.reload();
-    }, RECONNECT_INTERVAL_MS);
+    const interval = setInterval(() => { if (terminalId) playerActions.reload(); }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isConnected, terminalId]);
 
-  // Long press handlers
   const handlePressIn = useCallback(() => {
-    pressStartRef.current = Date.now();
-    longPressTimerRef.current = setTimeout(() => {
-      setMenuVisible(true);
-    }, LONG_PRESS_DURATION_MS);
+    longPressTimerRef.current = setTimeout(() => { setMenuVisible(true); }, LONG_PRESS_DURATION_MS);
   }, []);
 
   const handlePressOut = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
+    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
   }, []);
 
-  const handleVideoEnd = useCallback(() => {
-    playerActions.advance();
-  }, [playerActions.advance]);
+  const handleVideoEnd = useCallback(() => { playerActions.advance(); }, [playerActions.advance]);
 
   const handleChangeTerminal = useCallback(async () => {
     setMenuVisible(false);
@@ -136,11 +102,7 @@ export default function PlayerScreen() {
   }, [playerActions.reload]);
 
   if (!ready || !terminalId) {
-    return (
-      <View style={styles.black}>
-        <ActivityIndicator color={Colors.Primary} size="large" />
-      </View>
-    );
+    return <View style={styles.black}><ActivityIndicator color={Colors.Primary} size="large" /></View>;
   }
 
   if (loading) {
@@ -154,30 +116,32 @@ export default function PlayerScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Long press touch zone */}
+      {/*
+        TouchZone ocupa a tela MENOS a altura da faixa de rodapé.
+        Isso garante que o press longo não seja acidentalmente
+        ativado ao tocar na faixa.
+      */}
       <Pressable
-        style={styles.touchZone}
+        style={[styles.touchZone, { height: height - footerHeight }]}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         delayLongPress={LONG_PRESS_DURATION_MS}
       >
-        {/* Player content */}
         {hasNoScheduledMedia || !currentItem ? (
           <EmptyScreen />
         ) : (
           <CrossfadeView triggerKey={currentItem.media.id + currentItem.playlistItemId}>
-            <MediaRenderer
-              media={currentItem.media}
-              onVideoEnd={handleVideoEnd}
-            />
+            <MediaRenderer media={currentItem.media} onVideoEnd={handleVideoEnd} />
           </CrossfadeView>
         )}
       </Pressable>
 
-      {/* Connection Banner */}
+      {/* Nota de Rodapé — renderizada apenas se habilitada no painel */}
+      {footerConfig && <FooterBar config={footerConfig} />}
+
+      {/* Connection Banner (flutuante, acima de tudo) */}
       <ConnectionBanner visible={!isConnected} />
 
-      {/* Hidden Menu */}
       <HiddenMenu
         visible={menuVisible}
         terminalName={terminalName}
@@ -196,6 +160,8 @@ const styles = StyleSheet.create({
     width,
     height,
     backgroundColor: '#000',
+    flexDirection: 'column',
+    justifyContent: 'flex-end', // faixa fica na base
   },
   black: {
     flex: 1,
@@ -205,9 +171,8 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   touchZone: {
-    flex: 1,
     width,
-    height,
+    flex: 1, // ocupa o espaço acima da faixa
   },
   loadingText: {
     color: Colors.TextMuted,
