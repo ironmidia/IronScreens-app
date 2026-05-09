@@ -1,5 +1,5 @@
 // Iron Screens — Footer Bar Component
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,8 +12,9 @@ import {
 import type { FooterBarConfig } from '@/hooks/useFooterBar';
 
 const TICKER_SPEED = 100; // pixels por segundo
-export const BAR_HEIGHT = 56;
-const FONT_SIZE = 22;
+export const BAR_HEIGHT = 52;
+const FONT_SIZE = 20;
+const CLOCK_SIZE = 16;
 
 interface Props {
   config: FooterBarConfig;
@@ -39,45 +40,49 @@ function useClock(enabled: boolean): string {
 function ScrollTicker({ text, textColor }: { text: string; textColor: string }) {
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(screenWidth)).current;
-  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+  const isRunning = useRef(false);
   const textWidthRef = useRef(0);
 
-  const startLoop = (textWidth: number) => {
-    // Para qualquer animação anterior
-    if (animRef.current) {
-      animRef.current.stop();
-      animRef.current = null;
-    }
-
-    // Reseta para fora da tela à direita
-    translateX.setValue(screenWidth);
+  // Loop recursivo: ao terminar cada passagem, reseta e começa de novo
+  const runLoop = useCallback((textWidth: number) => {
+    if (textWidth <= 0) return;
+    isRunning.current = true;
+    translateX.setValue(screenWidth); // reseta para fora à direita
 
     const totalDistance = screenWidth + textWidth + 80;
     const duration = (totalDistance / TICKER_SPEED) * 1000;
 
-    // Usa sequence para garantir reset antes de cada loop
-    const runOnce = Animated.timing(translateX, {
+    Animated.timing(translateX, {
       toValue: -(textWidth + 80),
       duration,
       easing: Easing.linear,
       useNativeDriver: true,
+    }).start(({ finished }) => {
+      // Quando terminar (e não foi interrompido), roda de novo
+      if (finished && isRunning.current) {
+        runLoop(textWidth);
+      }
     });
+  }, []);
 
-    animRef.current = Animated.loop(runOnce, { iterations: -1 });
-    animRef.current.start();
-  };
+  const stopLoop = useCallback(() => {
+    isRunning.current = false;
+    translateX.stopAnimation();
+    translateX.setValue(screenWidth);
+  }, []);
 
-  // Reinicia loop se o texto mudar
+  // Reinicia quando o texto muda
   useEffect(() => {
     if (textWidthRef.current > 0) {
-      startLoop(textWidthRef.current);
+      stopLoop();
+      // Pequeno delay para o setValue propagar antes de iniciar
+      const t = setTimeout(() => runLoop(textWidthRef.current), 50);
+      return () => clearTimeout(t);
     }
   }, [text]);
 
   useEffect(() => {
-    return () => {
-      if (animRef.current) animRef.current.stop();
-    };
+    return () => { stopLoop(); };
   }, []);
 
   return (
@@ -89,7 +94,8 @@ function ScrollTicker({ text, textColor }: { text: string; textColor: string }) 
           const w = e.nativeEvent.layout.width;
           if (w > 0 && w !== textWidthRef.current) {
             textWidthRef.current = w;
-            startLoop(w);
+            stopLoop();
+            runLoop(w);
           }
         }}
       >
@@ -106,7 +112,6 @@ export default function FooterBar({ config }: Props) {
 
   return (
     <View style={[styles.bar, { backgroundColor: bg }]}>
-      {/* Logo */}
       {config.logo_url ? (
         <Image source={{ uri: config.logo_url }} style={styles.logo} resizeMode="contain" />
       ) : null}
@@ -115,7 +120,6 @@ export default function FooterBar({ config }: Props) {
         <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
       ) : null}
 
-      {/* Texto scroll ou fixo */}
       {config.mode === 'scroll' ? (
         <ScrollTicker text={config.text} textColor={tc} />
       ) : (
@@ -124,7 +128,6 @@ export default function FooterBar({ config }: Props) {
         </Text>
       )}
 
-      {/* Data e hora */}
       {config.show_datetime && clock ? (
         <>
           <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
@@ -177,7 +180,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   clock: {
-    fontSize: 18,
+    fontSize: CLOCK_SIZE,
     fontWeight: '600',
     letterSpacing: 0.5,
     flexShrink: 0,
