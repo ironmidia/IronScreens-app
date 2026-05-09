@@ -23,8 +23,6 @@ import FooterBar, { BAR_HEIGHT } from '@/components/player/FooterBar';
 import { Colors, Typography, Spacing } from '@/constants/theme';
 import { LONG_PRESS_DURATION_MS, RECONNECT_INTERVAL_MS } from '@/constants/config';
 
-const { width, height } = Dimensions.get('window');
-
 export default function PlayerScreen() {
   useKeepAwake();
 
@@ -42,7 +40,6 @@ export default function PlayerScreen() {
   const footerConfig = useFooterBar();
   const footerHeight = footerConfig ? BAR_HEIGHT : 0;
 
-  // Load saved terminal on mount
   useEffect(() => {
     async function init() {
       const { terminalId: tid, orientation, name } = await loadTerminal();
@@ -58,7 +55,6 @@ export default function PlayerScreen() {
   const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
   const { currentItem, loading, hasNoScheduledMedia, isConnected } = playerState;
 
-  // Auto-advance timer para não-vídeos
   useEffect(() => {
     if (!currentItem) return;
     if (currentItem.media.type === 'video') return;
@@ -117,16 +113,12 @@ export default function PlayerScreen() {
   return (
     <View style={styles.root}>
       {/*
-        TouchZone ocupa a tela MENOS a altura da faixa de rodapé.
-        Isso garante que o press longo não seja acidentalmente
-        ativado ao tocar na faixa.
+        Mídia ocupa toda a tela (absoluteFill).
+        O footer flutua por cima com position absolute na base.
+        O touchZone cobre apenas a área acima do footer para evitar
+        ativar o menu escondido ao tocar no rodépé.
       */}
-      <Pressable
-        style={[styles.touchZone, { height: height - footerHeight }]}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        delayLongPress={LONG_PRESS_DURATION_MS}
-      >
+      <View style={StyleSheet.absoluteFill}>
         {hasNoScheduledMedia || !currentItem ? (
           <EmptyScreen />
         ) : (
@@ -134,9 +126,17 @@ export default function PlayerScreen() {
             <MediaRenderer media={currentItem.media} onVideoEnd={handleVideoEnd} />
           </CrossfadeView>
         )}
-      </Pressable>
+      </View>
 
-      {/* Nota de Rodapé — renderizada apenas se habilitada no painel */}
+      {/* Touch zone cobre a tela toda menos o footer */}
+      <Pressable
+        style={[styles.touchZone, { bottom: footerHeight }]}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        delayLongPress={LONG_PRESS_DURATION_MS}
+      />
+
+      {/* Nota de Rodapé — flutuante na base, por cima da mídia */}
       {footerConfig && <FooterBar config={footerConfig} />}
 
       {/* Connection Banner (flutuante, acima de tudo) */}
@@ -157,11 +157,7 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    width,
-    height,
     backgroundColor: '#000',
-    flexDirection: 'column',
-    justifyContent: 'flex-end', // faixa fica na base
   },
   black: {
     flex: 1,
@@ -170,9 +166,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.md,
   },
+  // Cobre toda a área acima do footer, captura o long press
   touchZone: {
-    width,
-    flex: 1, // ocupa o espaço acima da faixa
+    ...StyleSheet.absoluteFillObject,
+    bottom: 0, // sobrescrito inline com footerHeight
   },
   loadingText: {
     color: Colors.TextMuted,
