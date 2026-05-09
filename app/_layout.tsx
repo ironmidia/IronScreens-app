@@ -1,7 +1,7 @@
 // Iron Screens — Root Layout
 import { useEffect, useRef } from 'react';
 import { Platform, AppState, BackHandler, ToastAndroid } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
@@ -17,6 +17,8 @@ async function enableImmersiveMode() {
 
 export default function RootLayout() {
   const backPressedOnce = useRef(false);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     enableImmersiveMode();
@@ -28,26 +30,33 @@ export default function RootLayout() {
     });
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (backPressedOnce.current) {
-        BackHandler.exitApp();
+      // Se estiver no player, voltar para setup ao pressionar 2x
+      if (pathname === '/player') {
+        if (backPressedOnce.current) {
+          backPressedOnce.current = false;
+          router.replace('/setup');
+          return true;
+        }
+
+        backPressedOnce.current = true;
+        ToastAndroid.show('Pressione voltar novamente para trocar o terminal', ToastAndroid.SHORT);
+
+        setTimeout(() => {
+          backPressedOnce.current = false;
+        }, 2000);
+
         return true;
       }
 
-      backPressedOnce.current = true;
-      ToastAndroid.show('Pressione voltar novamente para sair', ToastAndroid.SHORT);
-
-      setTimeout(() => {
-        backPressedOnce.current = false;
-      }, 2000);
-
-      return true;
+      // Em qualquer outra tela, comportamento padrão
+      return false;
     });
 
     return () => {
       appStateSubscription.remove();
       backHandler.remove();
     };
-  }, []);
+  }, [pathname, router]);
 
   return (
     <SafeAreaProvider>
