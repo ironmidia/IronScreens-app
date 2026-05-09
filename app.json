@@ -36,7 +36,22 @@
           "backgroundColor": "#000000"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "@react-native-community/datetimepicker",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.ironmidia.ironscreens"
+        }
+      ],
+      "expo-asset",
+      "expo-audio",
+      "expo-font",
+      "expo-localization",
+      "expo-mail-composer",
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true
