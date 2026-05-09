@@ -19,7 +19,6 @@ interface Props {
   config: FooterBarConfig;
 }
 
-// Atualiza a cada 1 segundo para mostrar hora exata
 function useClock(enabled: boolean): string {
   const [label, setLabel] = useState('');
   useEffect(() => {
@@ -31,46 +30,42 @@ function useClock(enabled: boolean): string {
       setLabel(`${date}  ${time}`);
     };
     update();
-    const id = setInterval(update, 1_000); // atualiza todo segundo
+    const id = setInterval(update, 1_000);
     return () => clearInterval(id);
   }, [enabled]);
   return label;
 }
 
-// Texto completo: texto principal  ·  data hora
-function buildFullText(text: string, clock: string, showDatetime: boolean): string {
-  if (showDatetime && clock) return `${text}     ·     ${clock}`;
-  return text;
+interface ScrollTickerProps {
+  text: string;
+  clock: string;
+  showDatetime: boolean;
+  textColor: string;
+  bold: boolean;
+  italic: boolean;
 }
 
-function ScrollTicker({
-  fullText, textColor, bold, italic,
-}: {
-  fullText: string; textColor: string; bold: boolean; italic: boolean;
-}) {
+function ScrollTicker({ text, clock, showDatetime, textColor, bold, italic }: ScrollTickerProps) {
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(screenWidth)).current;
   const isRunning = useRef(false);
-  const textWidthRef = useRef(0);
+  const contentWidthRef = useRef(0);
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  const runLoop = useCallback((textWidth: number) => {
-    if (textWidth <= 0) return;
+  const runLoop = useCallback((contentWidth: number) => {
+    if (contentWidth <= 0) return;
     isRunning.current = true;
     translateX.setValue(screenWidth);
-
-    const totalDistance = screenWidth + textWidth + 120;
+    const totalDistance = screenWidth + contentWidth + 120;
     const duration = (totalDistance / TICKER_SPEED) * 1000;
-
     animRef.current = Animated.timing(translateX, {
-      toValue: -(textWidth + 120),
+      toValue: -(contentWidth + 120),
       duration,
       easing: Easing.linear,
       useNativeDriver: true,
     });
-
     animRef.current.start(({ finished }) => {
-      if (finished && isRunning.current) runLoop(textWidth);
+      if (finished && isRunning.current) runLoop(contentWidth);
     });
   }, [screenWidth]);
 
@@ -79,37 +74,49 @@ function ScrollTicker({
     animRef.current?.stop();
   }, []);
 
-  // Quando o texto muda (inclusive quando o clock muda a cada segundo),
-  // não reinicia a animação — apenas atualiza o conteúdo visualmente.
-  // O loop continua com a largura já medida.
-  // Isso evita o "pisca" a cada segundo.
-  // A largura só é re-medida via onLayout quando o componente monta.
-
   useEffect(() => {
     return () => { stopLoop(); };
   }, []);
 
+  // Reinicia apenas quando o texto principal mudar (não a cada tick do relógio)
+  const prevText = useRef(text);
+  useEffect(() => {
+    if (text !== prevText.current) {
+      prevText.current = text;
+      stopLoop();
+      contentWidthRef.current = 0;
+      translateX.setValue(screenWidth);
+    }
+  }, [text]);
+
   const fontWeight = bold ? ('bold' as const) : ('500' as const);
   const fontStyle  = italic ? ('italic' as const) : ('normal' as const);
+  const textStyle  = { color: textColor, fontWeight, fontStyle, fontSize: FONT_SIZE, letterSpacing: 0.3 };
 
   return (
     <View style={styles.tickerContainer}>
-      <Animated.Text
+      {/* Animated.View com flexDirection row garante tudo na mesma linha */}
+      <Animated.View
         style={[
-          styles.scrollText,
-          { color: textColor, fontWeight, fontStyle, transform: [{ translateX }] },
+          styles.tickerRow,
+          { transform: [{ translateX }] },
         ]}
         onLayout={(e) => {
           const w = e.nativeEvent.layout.width;
-          if (w > 0 && Math.abs(w - textWidthRef.current) > 10) {
-            textWidthRef.current = w;
+          if (w > 0 && Math.abs(w - contentWidthRef.current) > 10) {
+            contentWidthRef.current = w;
             stopLoop();
             runLoop(w);
           }
         }}
       >
-        {fullText}
-      </Animated.Text>
+        <Text style={textStyle}>{text}</Text>
+        {showDatetime && clock ? (
+          <Text style={[textStyle, styles.clockSeparator]}>
+            {'     ·     '}{clock}
+          </Text>
+        ) : null}
+      </Animated.View>
     </View>
   );
 }
@@ -124,30 +131,28 @@ export default function FooterBar({ config }: Props) {
   const fontWeight = bold   ? ('bold'   as const) : ('500' as const);
   const fontStyle  = italic ? ('italic' as const) : ('normal' as const);
 
-  // Ordem: texto principal  ·  data e hora
-  const fullScrollText = buildFullText(config.text, clock, config.show_datetime);
-
   return (
     <View style={[styles.bar, { backgroundColor: bg }]}>
       {/* Logo */}
       {config.logo_url ? (
         <Image source={{ uri: config.logo_url }} style={styles.logo} resizeMode="contain" />
       ) : null}
-
       {config.logo_url ? (
         <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
       ) : null}
 
-      {/* Modo scroll: texto + data/hora rolam juntos */}
+      {/* Modo scroll */}
       {config.mode === 'scroll' ? (
         <ScrollTicker
-          fullText={fullScrollText}
+          text={config.text}
+          clock={clock}
+          showDatetime={config.show_datetime}
           textColor={tc}
           bold={bold}
           italic={italic}
         />
       ) : (
-        // Modo fixo: lado a lado
+        // Modo fixo
         <>
           <Text numberOfLines={1} style={[styles.fixedText, { color: tc, fontWeight, fontStyle }]}>
             {config.text}
@@ -194,9 +199,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     justifyContent: 'center',
   },
-  scrollText: {
-    fontSize: FONT_SIZE,
-    letterSpacing: 0.3,
+  // Row interno que rola: mantém texto e relógio na mesma linha
+  tickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+  },
+  clockSeparator: {
     flexShrink: 0,
   },
   fixedText: {
