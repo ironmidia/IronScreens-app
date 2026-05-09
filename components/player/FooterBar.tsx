@@ -37,33 +37,42 @@ function useClock(enabled: boolean): string {
 
 /** Modo scroll: texto corre da direita para a esquerda em loop */
 function ScrollTicker({ text, textColor, fontSize = 15 }: { text: string; textColor: string; fontSize?: number }) {
-  const { width } = Dimensions.get('window');
-  const translateX = useRef(new Animated.Value(width)).current;
-  const textWidthRef = useRef(0);
+  const screenWidth = Dimensions.get('window').width;
+  const translateX = useRef(new Animated.Value(screenWidth)).current;
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   const startAnim = (textWidth: number) => {
-    translateX.setValue(width);
-    const distance = width + textWidth + 40;
+    if (animRef.current) animRef.current.stop();
+    translateX.setValue(screenWidth);
+    const distance = screenWidth + textWidth + 40;
     const duration = (distance / TICKER_SPEED) * 1000;
-    Animated.loop(
+    animRef.current = Animated.loop(
       Animated.timing(translateX, {
-        toValue: -textWidth - 40,
+        toValue: -(textWidth + 40),
         duration,
         easing: Easing.linear,
         useNativeDriver: true,
       })
-    ).start();
+    );
+    animRef.current.start();
   };
 
+  useEffect(() => {
+    return () => { if (animRef.current) animRef.current.stop(); };
+  }, []);
+
   return (
-    <View style={{ flex: 1, overflow: 'hidden' }}>
+    // Container com overflow hidden para cortar o texto fora dos limites
+    <View style={styles.tickerContainer}>
       <Animated.Text
         numberOfLines={1}
-        style={[styles.scrollText, { color: textColor, fontSize, transform: [{ translateX }] }]}
+        style={[
+          styles.scrollText,
+          { color: textColor, fontSize, transform: [{ translateX }] },
+        ]}
         onLayout={(e) => {
           const w = e.nativeEvent.layout.width;
-          textWidthRef.current = w;
-          startAnim(w);
+          if (w > 0) startAnim(w);
         }}
       >
         {text}
@@ -81,11 +90,7 @@ export default function FooterBar({ config }: Props) {
     <View style={[styles.bar, { backgroundColor: bg }]}>
       {/* Logo */}
       {config.logo_url ? (
-        <Image
-          source={{ uri: config.logo_url }}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        <Image source={{ uri: config.logo_url }} style={styles.logo} resizeMode="contain" />
       ) : null}
 
       {/* Separador vertical se tiver logo */}
@@ -95,7 +100,7 @@ export default function FooterBar({ config }: Props) {
 
       {/* Texto (scroll ou fixo) */}
       {config.mode === 'scroll' ? (
-        <ScrollTicker text={config.text} textColor={tc} />
+        <ScrollTicker text={config.text} textColor={tc} fontSize={15} />
       ) : (
         <Text numberOfLines={1} style={[styles.fixedText, { color: tc }]}>
           {config.text}
@@ -115,7 +120,6 @@ export default function FooterBar({ config }: Props) {
 
 const styles = StyleSheet.create({
   bar: {
-    // Posicionamento absoluto na base da tela, sobrepondo a mídia
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -126,7 +130,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 10,
     zIndex: 50,
-    elevation: 10, // Android
+    elevation: 10,
   },
   logo: {
     height: BAR_HEIGHT - 12,
@@ -138,12 +142,20 @@ const styles = StyleSheet.create({
     height: BAR_HEIGHT - 20,
     flexShrink: 0,
   },
+  // Container do ticker: ocupa espaço disponível e corta overflow
+  tickerContainer: {
+    flex: 1,
+    height: BAR_HEIGHT,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  // Texto do scroll: sem position absolute, flui normalmente
+  // O translateX move ele horizontalmente via transform
   scrollText: {
     fontWeight: '500',
     letterSpacing: 0.3,
-    position: 'absolute',
-    whiteSpace: 'nowrap',
-  } as any,
+    // Sem position:absolute — o onLayout funciona corretamente
+  },
   fixedText: {
     flex: 1,
     fontSize: 14,
