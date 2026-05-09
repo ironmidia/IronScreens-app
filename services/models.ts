@@ -9,6 +9,7 @@ export interface Terminal {
   device_id: string | null;
   client: string | null;
   location: string | null;
+  setup_pin: string | null; // PIN de 5 chars gerado pelo sistema React
   created_at: string;
   updated_at: string;
 }
@@ -78,5 +79,5 @@ export interface PlaybackItem {
   playlistItemId: string;
   media: Media;
   durationSec: number;
-  groupId: string | null; // if from group, tracks for index increment
+  groupId: string | null;
 }

@@ -1,27 +1,29 @@
-// Iron Screens — Design Tokens
+// Iron Screens — Design Tokens v2 (Ruby + Snow White palette)
 export const Colors = {
-  // Core palette — pure black player aesthetic
-  Background: '#000000',
-  Surface: '#0D0D0D',
+  // Core
+  Background: '#000000',       // Preto absoluto
+  Surface: '#111111',
   SurfaceElevated: '#1A1A1A',
   Border: '#2A2A2A',
 
-  // Brand
-  Primary: '#C8102E',     // Iron red accent
-  PrimaryLight: '#E8304E',
-  PrimaryDark: '#9A0020',
+  // Brand — Rubi
+  Primary: '#70001B',
+  PrimaryLight: '#8A0022',
+  PrimaryDark: '#500014',
+  PrimaryHighlight: 'rgba(112,0,27,0.15)',
 
-  // Text
-  TextPrimary: '#FFFFFF',
+  // Text — Branco Neve
+  TextPrimary: '#FBFBFB',
   TextSecondary: '#AAAAAA',
-  TextMuted: '#555555',
+  TextMuted: '#888888',
+  TextFaint: '#555555',
 
   // Semantic
   Success: '#22C55E',
   Warning: '#F59E0B',
   Error: '#EF4444',
   Online: '#22C55E',
-  Offline: '#EF4444',
+  Offline: '#555555',
 
   // Overlay
   Overlay: 'rgba(0,0,0,0.85)',
