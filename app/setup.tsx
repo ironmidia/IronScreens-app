@@ -39,7 +39,6 @@ export default function SetupScreen() {
   const [state, actions] = useSetup();
   const pinInputRef = useRef<TextInput>(null);
 
-  // After PIN confirmed and confirming finishes, navigate to player
   const prevConfirming = useRef(false);
   React.useEffect(() => {
     if (prevConfirming.current && !state.confirming && !state.error && state.savedTerminalId) {
@@ -86,11 +85,10 @@ export default function SetupScreen() {
     <>
       <View style={styles.header}>
         <Image
-          source={require('@/assets/images/iron-screens-logo.png')}
+          source={require('@/assets/images/Logo_menor_branco.png')}
           style={styles.logo}
           contentFit="contain"
         />
-        <Text style={styles.headerTitle}>Iron Screens</Text>
         <Text style={styles.headerSubtitle}>Selecione o terminal deste dispositivo</Text>
       </View>
 
@@ -142,14 +140,12 @@ export default function SetupScreen() {
         style={styles.pinWrapper}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Back button */}
         <Pressable style={styles.backBtn} onPress={actions.backToSelect}>
           <MaterialIcons name="arrow-back" size={20} color={Colors.TextMuted} />
           <Text style={styles.backBtnText}>Voltar</Text>
         </Pressable>
 
         <View style={styles.pinCard}>
-          {/* Terminal info */}
           <View style={styles.pinTerminalRow}>
             <View style={styles.iconBox}>
               <MaterialIcons
@@ -173,7 +169,6 @@ export default function SetupScreen() {
             Digite o PIN de 5 dígitos gerado no sistema Iron Screens
           </Text>
 
-          {/* PIN Input */}
           <TextInput
             ref={pinInputRef}
             style={[
@@ -193,7 +188,6 @@ export default function SetupScreen() {
             autoFocus
           />
 
-          {/* Error / lockout message */}
           {state.lockedOut ? (
             <View style={styles.lockoutBanner}>
               <MaterialIcons name="lock-clock" size={16} color={Colors.Warning} />
@@ -208,7 +202,6 @@ export default function SetupScreen() {
             </View>
           ) : null}
 
-          {/* Confirm button */}
           <Pressable
             style={({ pressed }) => [
               styles.confirmBtn,
@@ -242,32 +235,23 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.Background },
   safe: { flex: 1 },
 
-  // ── Header ──
   header: {
     alignItems: 'center',
     paddingTop: Spacing.xl,
     paddingBottom: Spacing.lg,
     paddingHorizontal: Spacing.lg,
+    gap: Spacing.md,
   },
-  logo: { width: 64, height: 64, marginBottom: Spacing.md },
-  headerTitle: {
-    color: Colors.TextPrimary,
-    fontSize: Typography.sizes.xl,
-    fontWeight: Typography.weights.bold,
-    letterSpacing: 1.5,
-    marginBottom: Spacing.xs,
-  },
+  logo: { width: 160, height: 56, marginBottom: Spacing.xs },
   headerSubtitle: {
     color: Colors.TextMuted,
     fontSize: Typography.sizes.sm,
     textAlign: 'center',
   },
 
-  // ── List ──
   list: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xl },
   separator: { height: Spacing.sm },
 
-  // ── Terminal Card ──
   card: {
     backgroundColor: Colors.Surface,
     borderRadius: Radius.md,
@@ -309,7 +293,6 @@ const styles = StyleSheet.create({
   online: { backgroundColor: Colors.Online },
   offline: { backgroundColor: Colors.Offline },
 
-  // ── Center / Empty / Error ──
   center: {
     flex: 1,
     alignItems: 'center',
@@ -335,7 +318,6 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
   },
 
-  // ── PIN Step ──
   pinWrapper: {
     flex: 1,
     paddingHorizontal: Spacing.md,
