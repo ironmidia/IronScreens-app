@@ -8,12 +8,11 @@ import {
   Easing,
   StyleSheet,
   Dimensions,
-  Platform,
 } from 'react-native';
 import type { FooterBarConfig } from '@/hooks/useFooterBar';
 
 const TICKER_SPEED = 80; // pixels por segundo
-const BAR_HEIGHT = 48;
+export const BAR_HEIGHT = 48;
 
 interface Props {
   config: FooterBarConfig;
@@ -79,7 +78,7 @@ export default function FooterBar({ config }: Props) {
   const tc = config.text_color || '#ffffff';
 
   return (
-    <View style={[styles.bar, { backgroundColor: bg, height: BAR_HEIGHT }]}>
+    <View style={[styles.bar, { backgroundColor: bg }]}>
       {/* Logo */}
       {config.logo_url ? (
         <Image
@@ -114,17 +113,20 @@ export default function FooterBar({ config }: Props) {
   );
 }
 
-export { BAR_HEIGHT };
-
 const styles = StyleSheet.create({
   bar: {
-    width: '100%',
+    // Posicionamento absoluto na base da tela, sobrepondo a mídia
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: BAR_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
     gap: 10,
-    // Garante que fique acima do conteúdo mas abaixo do menu
-    zIndex: 20,
+    zIndex: 50,
+    elevation: 10, // Android
   },
   logo: {
     height: BAR_HEIGHT - 12,
