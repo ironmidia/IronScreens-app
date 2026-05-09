@@ -4,7 +4,7 @@
     "slug": "iron-screens",
     "version": "1.0.0",
     "orientation": "landscape",
-    "icon": "./assets/images/Logo_menor_branco.png",
+    "icon": "./assets/images/Iron_icon.png",
     "scheme": "ironscreens",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -23,7 +23,7 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/Logo_menor_branco.png"
+      "favicon": "./assets/images/Iron_icon.png"
     },
     "plugins": [
       "expo-router",
