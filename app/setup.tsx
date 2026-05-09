@@ -86,7 +86,7 @@ export default function SetupScreen() {
     <>
       <View style={styles.header}>
         <Image
-          source={require('@/assets/images/icon.png')}
+          source={require('@/assets/images/iron-screens-logo.png')}
           style={styles.logo}
           contentFit="contain"
         />

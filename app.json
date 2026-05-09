@@ -4,7 +4,7 @@
     "slug": "iron-screens",
     "version": "1.0.0",
     "orientation": "landscape",
-    "icon": "./assets/images/logo.png",
+    "icon": "./assets/images/iron-screens-logo.png",
     "scheme": "ironscreens",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/logo.png",
+        "foregroundImage": "./assets/images/iron-screens-logo.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
@@ -23,14 +23,14 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/logo.png"
+      "favicon": "./assets/images/iron-screens-logo.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/logo.png",
+          "image": "./assets/images/iron-screens-logo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#000000"
