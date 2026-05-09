@@ -9,7 +9,9 @@ import * as NavigationBar from 'expo-navigation-bar';
 async function enableImmersiveMode() {
   if (Platform.OS === 'android') {
     await NavigationBar.setVisibilityAsync('hidden');
-    await NavigationBar.setBehaviorAsync('overlay-swipe');
+    await NavigationBar.setBehaviorAsync('immersive-sticky');
+    await NavigationBar.setPositionAsync('absolute');
+    await NavigationBar.setBackgroundColorAsync('#00000000');
   }
 }
 
@@ -28,7 +30,7 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" hidden />
+      <StatusBar style="light" hidden={true} translucent={true} />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="setup" />
