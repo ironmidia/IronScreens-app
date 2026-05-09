@@ -3,7 +3,7 @@
     "name": "Iron Screens",
     "slug": "iron-screens",
     "version": "1.0.0",
-    "orientation": "landscape",
+    "orientation": "default",
     "icon": "./assets/images/Iron_icon.png",
     "scheme": "ironscreens",
     "userInterfaceStyle": "automatic",
