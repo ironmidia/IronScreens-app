@@ -37,17 +37,20 @@ function useClock(enabled: boolean): string {
   return label;
 }
 
-function ScrollTicker({ text, textColor }: { text: string; textColor: string }) {
+function ScrollTicker({
+  text, textColor, bold, italic,
+}: {
+  text: string; textColor: string; bold: boolean; italic: boolean;
+}) {
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(screenWidth)).current;
   const isRunning = useRef(false);
   const textWidthRef = useRef(0);
 
-  // Loop recursivo: ao terminar cada passagem, reseta e começa de novo
   const runLoop = useCallback((textWidth: number) => {
     if (textWidth <= 0) return;
     isRunning.current = true;
-    translateX.setValue(screenWidth); // reseta para fora à direita
+    translateX.setValue(screenWidth);
 
     const totalDistance = screenWidth + textWidth + 80;
     const duration = (totalDistance / TICKER_SPEED) * 1000;
@@ -58,10 +61,7 @@ function ScrollTicker({ text, textColor }: { text: string; textColor: string }) 
       easing: Easing.linear,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      // Quando terminar (e não foi interrompido), roda de novo
-      if (finished && isRunning.current) {
-        runLoop(textWidth);
-      }
+      if (finished && isRunning.current) runLoop(textWidth);
     });
   }, []);
 
@@ -71,11 +71,9 @@ function ScrollTicker({ text, textColor }: { text: string; textColor: string }) 
     translateX.setValue(screenWidth);
   }, []);
 
-  // Reinicia quando o texto muda
   useEffect(() => {
     if (textWidthRef.current > 0) {
       stopLoop();
-      // Pequeno delay para o setValue propagar antes de iniciar
       const t = setTimeout(() => runLoop(textWidthRef.current), 50);
       return () => clearTimeout(t);
     }
@@ -85,11 +83,17 @@ function ScrollTicker({ text, textColor }: { text: string; textColor: string }) 
     return () => { stopLoop(); };
   }, []);
 
+  const fontWeight = bold ? 'bold' : '500';
+  const fontStyle  = italic ? 'italic' : 'normal';
+
   return (
     <View style={styles.tickerContainer}>
       <Animated.Text
         numberOfLines={1}
-        style={[styles.scrollText, { color: textColor, transform: [{ translateX }] }]}
+        style={[
+          styles.scrollText,
+          { color: textColor, fontWeight, fontStyle, transform: [{ translateX }] },
+        ]}
         onLayout={(e) => {
           const w = e.nativeEvent.layout.width;
           if (w > 0 && w !== textWidthRef.current) {
@@ -106,12 +110,18 @@ function ScrollTicker({ text, textColor }: { text: string; textColor: string }) 
 }
 
 export default function FooterBar({ config }: Props) {
-  const clock = useClock(config.show_datetime);
-  const bg = config.bg_color || '#1a1a1a';
-  const tc = config.text_color || '#ffffff';
+  const clock  = useClock(config.show_datetime);
+  const bg     = config.bg_color   || '#1a1a1a';
+  const tc     = config.text_color || '#ffffff';
+  const bold   = !!(config as any).bold;
+  const italic = !!(config as any).italic;
+
+  const fontWeight = bold   ? ('bold'   as const) : ('500' as const);
+  const fontStyle  = italic ? ('italic' as const) : ('normal' as const);
 
   return (
     <View style={[styles.bar, { backgroundColor: bg }]}>
+      {/* Logo */}
       {config.logo_url ? (
         <Image source={{ uri: config.logo_url }} style={styles.logo} resizeMode="contain" />
       ) : null}
@@ -120,14 +130,16 @@ export default function FooterBar({ config }: Props) {
         <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
       ) : null}
 
+      {/* Texto scroll ou fixo */}
       {config.mode === 'scroll' ? (
-        <ScrollTicker text={config.text} textColor={tc} />
+        <ScrollTicker text={config.text} textColor={tc} bold={bold} italic={italic} />
       ) : (
-        <Text numberOfLines={1} style={[styles.fixedText, { color: tc }]}>
+        <Text numberOfLines={1} style={[styles.fixedText, { color: tc, fontWeight, fontStyle }]}>
           {config.text}
         </Text>
       )}
 
+      {/* Data e hora */}
       {config.show_datetime && clock ? (
         <>
           <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
@@ -170,13 +182,11 @@ const styles = StyleSheet.create({
   },
   scrollText: {
     fontSize: FONT_SIZE,
-    fontWeight: '500',
     letterSpacing: 0.3,
   },
   fixedText: {
     flex: 1,
     fontSize: FONT_SIZE,
-    fontWeight: '500',
     letterSpacing: 0.3,
   },
   clock: {
