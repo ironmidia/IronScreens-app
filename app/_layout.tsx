@@ -1,6 +1,6 @@
 // Iron Screens — Root Layout
-import { useEffect } from 'react';
-import { Platform, AppState } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { Platform, AppState, BackHandler, ToastAndroid } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -16,16 +16,37 @@ async function enableImmersiveMode() {
 }
 
 export default function RootLayout() {
+  const backPressedOnce = useRef(false);
+
   useEffect(() => {
     enableImmersiveMode();
 
-    const subscription = AppState.addEventListener('change', (state) => {
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         enableImmersiveMode();
       }
     });
 
-    return () => subscription.remove();
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (backPressedOnce.current) {
+        BackHandler.exitApp();
+        return true;
+      }
+
+      backPressedOnce.current = true;
+      ToastAndroid.show('Pressione voltar novamente para sair', ToastAndroid.SHORT);
+
+      setTimeout(() => {
+        backPressedOnce.current = false;
+      }, 2000);
+
+      return true;
+    });
+
+    return () => {
+      appStateSubscription.remove();
+      backHandler.remove();
+    };
   }, []);
 
   return (
