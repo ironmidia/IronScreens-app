@@ -1,5 +1,16 @@
 // Iron Screens — Terminal Service
 import { supabase } from './supabase';
+import { Terminal } from './models';
+
+/** Busca todos os terminais cadastrados */
+export async function fetchTerminals(): Promise<Terminal[]> {
+  const { data, error } = await supabase
+    .from('terminals')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Terminal[];
+}
 
 /** Marca o terminal como online E atualiza last_heartbeat */
 export async function setTerminalOnline(terminalId: string): Promise<void> {
