@@ -75,7 +75,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
       if (item.item_type === 'media' && item.media_id) {
         const media = mediaMap[item.media_id];
         if (!media) continue;
-        // FIX 3: aceita mídia sem orientação definida
         if (!orientationMatch(media.orientation, terminalOrientation)) continue;
         expanded.push({
           playlistItemId: item.id,
@@ -93,7 +92,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
         const currentGroupIndex = groupIndicesRef.current[item.group_id] ?? 0;
         let selectedItem: typeof groupItems[0] | undefined;
 
-        // FIX 3 (group): mesmo critério flexível
         const validItems = groupItems.filter(
           (gi) => gi.media && orientationMatch((gi.media as any).orientation, terminalOrientation)
         );
@@ -142,8 +140,7 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalId, terminalOrientation]);
 
-  // FIX 1: loadPlaylist (usado pelo realtime e reload manual) mantém o índice atual
-  // para não resetar para item 1 a cada evento do Supabase Realtime
+  // loadPlaylist (usado pelo realtime e reload manual) mantém o índice atual
   const loadPlaylist = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -180,11 +177,14 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
   }, [terminalId]);
 
   // Realtime subscription
+  // Escuta: playlist_items, media, media_group_items e terminals
+  // para recarregar a playlist sempre que qualquer dado relevante mudar.
   useEffect(() => {
     const channel = supabase
       .channel(`terminal_${terminalId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'playlist_items' }, () => { loadPlaylist(); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'media' }, () => { loadPlaylist(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'media_group_items' }, () => { loadPlaylist(); })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'terminals', filter: `id=eq.${terminalId}` }, () => { loadPlaylist(); })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -217,8 +217,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     }
 
     const nextIndex = (currentIndexRef.current + 1) % list.length;
-    // FIX 2: atualiza ref ANTES do setState para que currentItem calculado
-    // inline já use o valor correto no mesmo ciclo de render
     currentIndexRef.current = nextIndex;
     setCurrentIndex(nextIndex);
 
@@ -226,8 +224,7 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     setHasNoScheduledMedia(!anyScheduled);
   }, [terminalId]);
 
-  // FIX 2: currentItem usa playlistRef (síncrono) em vez de playlist (state assíncrono)
-  // evita o item ficar "preso" no índice anterior durante o render seguinte ao advance()
+  // currentItem usa playlistRef (síncrono) em vez de playlist (state assíncrono)
   const currentItem = (() => {
     const list = playlistRef.current.length ? playlistRef.current : playlist;
     if (!list.length) return null;
