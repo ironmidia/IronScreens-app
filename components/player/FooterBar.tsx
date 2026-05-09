@@ -19,6 +19,7 @@ interface Props {
   config: FooterBarConfig;
 }
 
+// Atualiza a cada 1 segundo para mostrar hora exata
 function useClock(enabled: boolean): string {
   const [label, setLabel] = useState('');
   useEffect(() => {
@@ -26,19 +27,19 @@ function useClock(enabled: boolean): string {
     const update = () => {
       const now = new Date();
       const date = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLabel(`${date}  ${time}`);
     };
     update();
-    const id = setInterval(update, 30_000);
+    const id = setInterval(update, 1_000); // atualiza todo segundo
     return () => clearInterval(id);
   }, [enabled]);
   return label;
 }
 
-// Monta o texto completo que vai rolar: texto + separador + data/hora (se habilitado)
+// Texto completo: texto principal  ·  data hora
 function buildFullText(text: string, clock: string, showDatetime: boolean): string {
-  if (showDatetime && clock) return `${text}      ·      ${clock}`;
+  if (showDatetime && clock) return `${text}     ·     ${clock}`;
   return text;
 }
 
@@ -51,6 +52,7 @@ function ScrollTicker({
   const translateX = useRef(new Animated.Value(screenWidth)).current;
   const isRunning = useRef(false);
   const textWidthRef = useRef(0);
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   const runLoop = useCallback((textWidth: number) => {
     if (textWidth <= 0) return;
@@ -60,27 +62,28 @@ function ScrollTicker({
     const totalDistance = screenWidth + textWidth + 120;
     const duration = (totalDistance / TICKER_SPEED) * 1000;
 
-    Animated.timing(translateX, {
+    animRef.current = Animated.timing(translateX, {
       toValue: -(textWidth + 120),
       duration,
       easing: Easing.linear,
       useNativeDriver: true,
-    }).start(({ finished }) => {
+    });
+
+    animRef.current.start(({ finished }) => {
       if (finished && isRunning.current) runLoop(textWidth);
     });
   }, [screenWidth]);
 
   const stopLoop = useCallback(() => {
     isRunning.current = false;
-    translateX.stopAnimation();
+    animRef.current?.stop();
   }, []);
 
-  // Reinicia loop quando o texto mudar
-  useEffect(() => {
-    stopLoop();
-    textWidthRef.current = 0;
-    translateX.setValue(screenWidth);
-  }, [fullText]);
+  // Quando o texto muda (inclusive quando o clock muda a cada segundo),
+  // não reinicia a animação — apenas atualiza o conteúdo visualmente.
+  // O loop continua com a largura já medida.
+  // Isso evita o "pisca" a cada segundo.
+  // A largura só é re-medida via onLayout quando o componente monta.
 
   useEffect(() => {
     return () => { stopLoop(); };
@@ -92,14 +95,13 @@ function ScrollTicker({
   return (
     <View style={styles.tickerContainer}>
       <Animated.Text
-        // SEM numberOfLines para não cortar o texto
         style={[
           styles.scrollText,
           { color: textColor, fontWeight, fontStyle, transform: [{ translateX }] },
         ]}
         onLayout={(e) => {
           const w = e.nativeEvent.layout.width;
-          if (w > 0 && w !== textWidthRef.current) {
+          if (w > 0 && Math.abs(w - textWidthRef.current) > 10) {
             textWidthRef.current = w;
             stopLoop();
             runLoop(w);
@@ -122,7 +124,7 @@ export default function FooterBar({ config }: Props) {
   const fontWeight = bold   ? ('bold'   as const) : ('500' as const);
   const fontStyle  = italic ? ('italic' as const) : ('normal' as const);
 
-  // No modo scroll: texto + data/hora entram juntos no ticker
+  // Ordem: texto principal  ·  data e hora
   const fullScrollText = buildFullText(config.text, clock, config.show_datetime);
 
   return (
@@ -136,7 +138,7 @@ export default function FooterBar({ config }: Props) {
         <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
       ) : null}
 
-      {/* Modo scroll: tudo dentro do ticker (texto + data/hora juntos) */}
+      {/* Modo scroll: texto + data/hora rolam juntos */}
       {config.mode === 'scroll' ? (
         <ScrollTicker
           fullText={fullScrollText}
@@ -145,7 +147,7 @@ export default function FooterBar({ config }: Props) {
           italic={italic}
         />
       ) : (
-        // Modo fixo: texto e data/hora lado a lado, fixos
+        // Modo fixo: lado a lado
         <>
           <Text numberOfLines={1} style={[styles.fixedText, { color: tc, fontWeight, fontStyle }]}>
             {config.text}
@@ -195,7 +197,6 @@ const styles = StyleSheet.create({
   scrollText: {
     fontSize: FONT_SIZE,
     letterSpacing: 0.3,
-    // whitespace: não quebra linha no ticker
     flexShrink: 0,
   },
   fixedText: {
