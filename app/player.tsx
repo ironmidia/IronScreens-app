@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useKeepAwake } from 'expo-keep-awake';
+import useKeepAwake from '@/hooks/useKeepAwake';
 import { loadTerminal, clearTerminal } from '@/services/storageService';
 import { usePlayer } from '@/hooks/usePlayer';
 import MediaRenderer from '@/components/media/MediaRenderer';
