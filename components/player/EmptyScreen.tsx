@@ -10,7 +10,7 @@ function EmptyScreen() {
   return (
     <View style={styles.container}>
       <Image
-        source={require('@/assets/images/iron-screens-logo.png')}
+        source={require('@/assets/images/Logo_menor_branco.png')}
         style={styles.logo}
         contentFit="contain"
         transition={300}
