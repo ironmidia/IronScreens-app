@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import type { FooterBarConfig } from '@/hooks/useFooterBar';
 
-const TICKER_SPEED = 80; // pixels por segundo
+const TICKER_SPEED = 80;
 export const BAR_HEIGHT = 52;
 const FONT_SIZE = 20;
 
@@ -74,11 +74,6 @@ function ScrollTicker({ text, clock, showDatetime, textColor, bold, italic }: Sc
     animRef.current?.stop();
   }, []);
 
-  useEffect(() => {
-    return () => { stopLoop(); };
-  }, []);
-
-  // Reinicia apenas quando o texto principal mudar (não a cada tick do relógio)
   const prevText = useRef(text);
   useEffect(() => {
     if (text !== prevText.current) {
@@ -89,18 +84,20 @@ function ScrollTicker({ text, clock, showDatetime, textColor, bold, italic }: Sc
     }
   }, [text]);
 
+  useEffect(() => { return () => { stopLoop(); }; }, []);
+
   const fontWeight = bold ? ('bold' as const) : ('500' as const);
   const fontStyle  = italic ? ('italic' as const) : ('normal' as const);
-  const textStyle  = { color: textColor, fontWeight, fontStyle, fontSize: FONT_SIZE, letterSpacing: 0.3 };
+
+  // String única: evita qualquer quebra entre os dois blocos de texto
+  const fullText = showDatetime && clock
+    ? `${text}     ·     ${clock}`
+    : text;
 
   return (
     <View style={styles.tickerContainer}>
-      {/* Animated.View com flexDirection row garante tudo na mesma linha */}
       <Animated.View
-        style={[
-          styles.tickerRow,
-          { transform: [{ translateX }] },
-        ]}
+        style={[styles.tickerRow, { transform: [{ translateX }] }]}
         onLayout={(e) => {
           const w = e.nativeEvent.layout.width;
           if (w > 0 && Math.abs(w - contentWidthRef.current) > 10) {
@@ -110,12 +107,24 @@ function ScrollTicker({ text, clock, showDatetime, textColor, bold, italic }: Sc
           }
         }}
       >
-        <Text style={textStyle}>{text}</Text>
-        {showDatetime && clock ? (
-          <Text style={[textStyle, styles.clockSeparator]}>
-            {'     ·     '}{clock}
-          </Text>
-        ) : null}
+        {/* Text único com numberOfLines=1 garante linha única absoluta */}
+        <Text
+          numberOfLines={1}
+          ellipsizeMode="clip"
+          style={{
+            fontSize: FONT_SIZE,
+            letterSpacing: 0.3,
+            color: textColor,
+            fontWeight,
+            fontStyle,
+            // Impede qualquer wrap
+            flexShrink: 0,
+            maxHeight: BAR_HEIGHT,
+            lineHeight: BAR_HEIGHT,
+          }}
+        >
+          {fullText}
+        </Text>
       </Animated.View>
     </View>
   );
@@ -133,7 +142,6 @@ export default function FooterBar({ config }: Props) {
 
   return (
     <View style={[styles.bar, { backgroundColor: bg }]}>
-      {/* Logo */}
       {config.logo_url ? (
         <Image source={{ uri: config.logo_url }} style={styles.logo} resizeMode="contain" />
       ) : null}
@@ -141,7 +149,6 @@ export default function FooterBar({ config }: Props) {
         <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
       ) : null}
 
-      {/* Modo scroll */}
       {config.mode === 'scroll' ? (
         <ScrollTicker
           text={config.text}
@@ -152,17 +159,10 @@ export default function FooterBar({ config }: Props) {
           italic={italic}
         />
       ) : (
-        // Modo fixo
         <>
           <Text numberOfLines={1} style={[styles.fixedText, { color: tc, fontWeight, fontStyle }]}>
-            {config.text}
+            {config.text}{config.show_datetime && clock ? `     ·     ${clock}` : ''}
           </Text>
-          {config.show_datetime && clock ? (
-            <>
-              <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
-              <Text style={[styles.clockFixed, { color: tc, fontWeight, fontStyle }]}>{clock}</Text>
-            </>
-          ) : null}
         </>
       )}
     </View>
@@ -198,24 +198,20 @@ const styles = StyleSheet.create({
     height: BAR_HEIGHT,
     overflow: 'hidden',
     justifyContent: 'center',
+    // Impede que o container empurre o conteúdo para baixo
+    flexDirection: 'row',
   },
-  // Row interno que rola: mantém texto e relógio na mesma linha
   tickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'center',
+    // Nunca quebra
     flexWrap: 'nowrap',
-  },
-  clockSeparator: {
-    flexShrink: 0,
+    height: BAR_HEIGHT,
   },
   fixedText: {
     flex: 1,
     fontSize: FONT_SIZE,
     letterSpacing: 0.3,
-  },
-  clockFixed: {
-    fontSize: FONT_SIZE,
-    letterSpacing: 0.5,
-    flexShrink: 0,
   },
 });
