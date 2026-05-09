@@ -3,13 +3,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
-  Dimensions,
   Pressable,
   ActivityIndicator,
   Text,
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import useKeepAwake from '@/hooks/useKeepAwake';
 import { loadTerminal, clearTerminal } from '@/services/storageService';
 import { usePlayer } from '@/hooks/usePlayer';
@@ -22,6 +22,14 @@ import CrossfadeView from '@/components/player/CrossfadeView';
 import FooterBar, { BAR_HEIGHT } from '@/components/player/FooterBar';
 import { Colors, Typography, Spacing } from '@/constants/theme';
 import { LONG_PRESS_DURATION_MS, RECONNECT_INTERVAL_MS } from '@/constants/config';
+
+async function applyOrientation(orientation: string) {
+  if (orientation === 'vertical') {
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
+  } else {
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+  }
+}
 
 export default function PlayerScreen() {
   useKeepAwake();
@@ -45,11 +53,18 @@ export default function PlayerScreen() {
       const { terminalId: tid, orientation, name } = await loadTerminal();
       if (!tid) { router.replace('/setup'); return; }
       setTerminalId(tid);
-      setTerminalOrientation(orientation || 'horizontal');
+      const resolvedOrientation = orientation || 'horizontal';
+      setTerminalOrientation(resolvedOrientation);
       setTerminalName(name);
+      await applyOrientation(resolvedOrientation);
       setReady(true);
     }
     init();
+
+    return () => {
+      // Ao sair do player, libera a orientação
+      ScreenOrientation.unlockAsync();
+    };
   }, [router]);
 
   const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
@@ -112,12 +127,6 @@ export default function PlayerScreen() {
 
   return (
     <View style={styles.root}>
-      {/*
-        Mídia ocupa toda a tela (absoluteFill).
-        O footer flutua por cima com position absolute na base.
-        O touchZone cobre apenas a área acima do footer para evitar
-        ativar o menu escondido ao tocar no rodépé.
-      */}
       <View style={StyleSheet.absoluteFill}>
         {hasNoScheduledMedia || !currentItem ? (
           <EmptyScreen />
@@ -166,10 +175,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.md,
   },
-  // Cobre toda a área acima do footer, captura o long press
   touchZone: {
     ...StyleSheet.absoluteFillObject,
-    bottom: 0, // sobrescrito inline com footerHeight
+    bottom: 0,
   },
   loadingText: {
     color: Colors.TextMuted,
