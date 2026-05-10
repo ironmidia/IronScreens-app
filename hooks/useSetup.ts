@@ -1,8 +1,9 @@
 // Iron Screens — Setup Hook (Terminal Selection + PIN Validation)
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Terminal } from '@/services/models';
-import { fetchTerminals, setTerminalOnline } from '@/services/terminalService';
+import { fetchTerminals, setTerminalOnline, setTerminalOffline } from '@/services/terminalService';
 import { saveTerminal, loadTerminal, clearTerminal } from '@/services/storageService';
+import { HEARTBEAT_INTERVAL_MS } from '@/constants/config';
 
 const MAX_ATTEMPTS = 3;
 const LOCKOUT_SECONDS = 30;
@@ -17,7 +18,6 @@ export interface SetupState {
   confirming: boolean;
   error: string | null;
   savedTerminalId: string | null;
-  // PIN state
   pinValue: string;
   pinError: string | null;
   pinAttempts: number;
@@ -43,13 +43,15 @@ export function useSetup(): [SetupState, SetupActions] {
   const [error, setError] = useState<string | null>(null);
   const [savedTerminalId, setSavedTerminalId] = useState<string | null>(null);
 
-  // PIN state
   const [pinValue, setPinValue] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinAttempts, setPinAttempts] = useState(0);
   const [lockedOut, setLockedOut] = useState(false);
   const [lockoutSecondsLeft, setLockoutSecondsLeft] = useState(0);
   const lockoutTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Terminal ativo para heartbeat enquanto estiver na tela de setup
+  const heartbeatTerminalRef = useRef<string | null>(null);
 
   const clearLockout = useCallback(() => {
     if (lockoutTimer.current) {
@@ -86,6 +88,12 @@ export function useSetup(): [SetupState, SetupActions] {
       ]);
       setTerminals(list);
       setSavedTerminalId(stored.terminalId);
+      // Registra terminal já salvo para heartbeat contínuo
+      if (stored.terminalId) {
+        heartbeatTerminalRef.current = stored.terminalId;
+        // Marca online imediatamente ao carregar
+        try { await setTerminalOnline(stored.terminalId); } catch { /* ignora */ }
+      }
     } catch (err: any) {
       setError(err.message || 'Erro ao carregar terminais');
     } finally {
@@ -94,6 +102,18 @@ export function useSetup(): [SetupState, SetupActions] {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Heartbeat contínuo enquanto o app estiver na tela de setup
+  // Mantém o terminal online mesmo sem estar no player
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const tid = heartbeatTerminalRef.current;
+      if (tid) {
+        try { await setTerminalOnline(tid); } catch { /* ignora falha de rede */ }
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   const selectTerminal = useCallback((terminal: Terminal) => {
     setSelectedTerminal(terminal);
@@ -116,7 +136,6 @@ export function useSetup(): [SetupState, SetupActions] {
 
   const onPinChange = useCallback((value: string) => {
     if (lockedOut) return;
-    // Accept only alphanumeric, max 5 chars, uppercase
     const clean = value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 5);
     setPinValue(clean);
     setPinError(null);
@@ -128,11 +147,11 @@ export function useSetup(): [SetupState, SetupActions] {
     const expectedPin = selectedTerminal.setup_pin;
 
     if (!expectedPin) {
-      // Terminal has no PIN configured — allow access (backwards compatibility)
       setConfirming(true);
       try {
         await saveTerminal(selectedTerminal.id, selectedTerminal.orientation, selectedTerminal.name);
         await setTerminalOnline(selectedTerminal.id);
+        heartbeatTerminalRef.current = selectedTerminal.id;
         setSavedTerminalId(selectedTerminal.id);
       } catch (err: any) {
         setError(err.message || 'Erro ao configurar terminal');
@@ -160,12 +179,13 @@ export function useSetup(): [SetupState, SetupActions] {
       return;
     }
 
-    // PIN correct
+    // PIN correto
     setPinError(null);
     setConfirming(true);
     try {
       await saveTerminal(selectedTerminal.id, selectedTerminal.orientation, selectedTerminal.name);
       await setTerminalOnline(selectedTerminal.id);
+      heartbeatTerminalRef.current = selectedTerminal.id;
       setSavedTerminalId(selectedTerminal.id);
     } catch (err: any) {
       setError(err.message || 'Erro ao configurar terminal');
@@ -174,9 +194,15 @@ export function useSetup(): [SetupState, SetupActions] {
     }
   }, [selectedTerminal, pinValue, pinAttempts, lockedOut, startLockout]);
 
+  // Limpa o terminal salvo e marca offline
   const clearSaved = useCallback(async () => {
+    const oldId = heartbeatTerminalRef.current;
     await clearTerminal();
+    heartbeatTerminalRef.current = null;
     setSavedTerminalId(null);
+    if (oldId) {
+      try { await setTerminalOffline(oldId); } catch { /* ignora */ }
+    }
   }, []);
 
   return [
