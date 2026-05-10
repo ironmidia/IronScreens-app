@@ -7,7 +7,7 @@ import { logDisplayEvent } from '@/services/displayEventService';
 import { setTerminalOnline, setTerminalOffline } from '@/services/terminalService';
 import { saveGroupIndices, loadGroupIndices } from '@/services/storageService';
 import { supabase } from '@/services/supabase';
-import { HEARTBEAT_INTERVAL_MS } from '@/constants/config';
+import { HEARTBEAT_INTERVAL_MS, PLAYLIST_POLL_INTERVAL_MS } from '@/constants/config';
 
 export interface PlayerState {
   currentItem: PlaybackItem | null;
@@ -24,10 +24,6 @@ export interface PlayerActions {
   reload: () => Promise<void>;
 }
 
-/**
- * Verifica se a mídia é compatível com a orientação do terminal.
- * Mídia sem orientação definida (null/undefined) é aceita em qualquer terminal.
- */
 function orientationMatch(
   mediaOrientation: string | null | undefined,
   terminalOrientation: string
@@ -48,14 +44,8 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
   const playlistRef = useRef<PlaybackItem[]>([]);
   const currentIndexRef = useRef(0);
 
-  // Keep refs in sync
-  useEffect(() => {
-    playlistRef.current = playlist;
-  }, [playlist]);
-
-  useEffect(() => {
-    currentIndexRef.current = currentIndex;
-  }, [currentIndex]);
+  useEffect(() => { playlistRef.current = playlist; }, [playlist]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
   const buildPlaylist = useCallback(async (): Promise<PlaybackItem[]> => {
     const rawItems = await fetchPlaylistItems(terminalId);
@@ -117,7 +107,7 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     return expanded;
   }, [terminalId, terminalOrientation]);
 
-  // Carregamento inicial — força índice 0 apenas no mount
+  // Carregamento inicial
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -140,9 +130,8 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalId, terminalOrientation]);
 
-  // loadPlaylist (usado pelo realtime e reload manual) mantém o índice atual
+  // loadPlaylist — mantém índice atual (usado por realtime, polling e reload manual)
   const loadPlaylist = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const items = await buildPlaylist();
@@ -158,12 +147,10 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     } catch (err: any) {
       setError(err.message || 'Erro ao carregar playlist');
       setIsConnected(false);
-    } finally {
-      setLoading(false);
     }
   }, [buildPlaylist]);
 
-  // Heartbeat — keep terminal online
+  // Heartbeat — mantém terminal online
   useEffect(() => {
     const heartbeat = setInterval(async () => {
       try {
@@ -176,9 +163,13 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     return () => clearInterval(heartbeat);
   }, [terminalId]);
 
-  // Realtime subscription
-  // Escuta: playlist_items, media, media_group_items e terminals
-  // para recarregar a playlist sempre que qualquer dado relevante mudar.
+  // Polling periódico de playlist — garante sincronização mesmo se o Realtime falhar
+  useEffect(() => {
+    const poll = setInterval(() => { loadPlaylist(); }, PLAYLIST_POLL_INTERVAL_MS);
+    return () => clearInterval(poll);
+  }, [loadPlaylist]);
+
+  // Realtime subscription — recarrega playlist em alterações
   useEffect(() => {
     const channel = supabase
       .channel(`terminal_${terminalId}`)
@@ -190,7 +181,7 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     return () => { supabase.removeChannel(channel); };
   }, [terminalId, loadPlaylist]);
 
-  // Cleanup on unmount — set offline
+  // Cleanup ao desmontar — marca offline
   useEffect(() => {
     return () => { setTerminalOffline(terminalId).catch(() => {}); };
   }, [terminalId]);
@@ -224,7 +215,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     setHasNoScheduledMedia(!anyScheduled);
   }, [terminalId]);
 
-  // currentItem usa playlistRef (síncrono) em vez de playlist (state assíncrono)
   const currentItem = (() => {
     const list = playlistRef.current.length ? playlistRef.current : playlist;
     if (!list.length) return null;

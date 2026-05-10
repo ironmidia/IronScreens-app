@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Text,
   Platform,
+  TVEventHandler,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -43,8 +44,10 @@ export default function PlayerScreen() {
 
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Contador de tempo de press para controle remoto (Android TV)
+  const tvLongPressCountRef = useRef(0);
+  const tvLongPressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Footer bar config (null = desativado)
   const footerConfig = useFooterBar();
   const footerHeight = footerConfig ? BAR_HEIGHT : 0;
 
@@ -60,11 +63,7 @@ export default function PlayerScreen() {
       setReady(true);
     }
     init();
-
-    return () => {
-      // Ao sair do player, libera a orientação
-      ScreenOrientation.unlockAsync();
-    };
+    return () => { ScreenOrientation.unlockAsync(); };
   }, [router]);
 
   const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
@@ -90,6 +89,68 @@ export default function PlayerScreen() {
     const interval = setInterval(() => { if (terminalId) playerActions.reload(); }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isConnected, terminalId]);
+
+  // ─── Suporte a controle remoto Android TV / Apple TV ────────────────────────
+  // Botões suportados:
+  //   select / playPause — inicia contagem de long press para abrir menu
+  //   back              — fecha o menu se aberto
+  //   up / down / left / right — ignorados (player fullscreen não navega)
+  useEffect(() => {
+    if (Platform.OS !== 'android' && Platform.OS !== 'ios') return;
+
+    const tvHandler = new TVEventHandler();
+
+    tvHandler.enable(null, (_cmp: any, evt: any) => {
+      if (!evt) return;
+      const { eventType } = evt;
+
+      if (eventType === 'select' || eventType === 'playPause' || eventType === 'longSelect') {
+        if (eventType === 'longSelect') {
+          // long select direto — abre menu imediatamente
+          setMenuVisible(true);
+          return;
+        }
+
+        // Simula long press: acumula presses curtos consecutivos (500ms cada)
+        if (!tvLongPressTimerRef.current) {
+          tvLongPressCountRef.current = 0;
+          tvLongPressTimerRef.current = setInterval(() => {
+            tvLongPressCountRef.current += 1;
+            // Após 5 presses consecutivos (~2.5s mantendo OK), abre menu
+            if (tvLongPressCountRef.current >= 5) {
+              setMenuVisible(true);
+              if (tvLongPressTimerRef.current) {
+                clearInterval(tvLongPressTimerRef.current);
+                tvLongPressTimerRef.current = null;
+              }
+            }
+          }, 500);
+        } else {
+          // Reset do timer se houver pausa entre presses
+          tvLongPressCountRef.current = 0;
+        }
+      } else if (eventType === 'back') {
+        if (menuVisible) {
+          setMenuVisible(false);
+        }
+      } else {
+        // Qualquer outro evento cancela a contagem
+        if (tvLongPressTimerRef.current) {
+          clearInterval(tvLongPressTimerRef.current);
+          tvLongPressTimerRef.current = null;
+          tvLongPressCountRef.current = 0;
+        }
+      }
+    });
+
+    return () => {
+      tvHandler.disable();
+      if (tvLongPressTimerRef.current) {
+        clearInterval(tvLongPressTimerRef.current);
+        tvLongPressTimerRef.current = null;
+      }
+    };
+  }, [menuVisible]);
 
   const handlePressIn = useCallback(() => {
     longPressTimerRef.current = setTimeout(() => { setMenuVisible(true); }, LONG_PRESS_DURATION_MS);
@@ -145,10 +206,8 @@ export default function PlayerScreen() {
         delayLongPress={LONG_PRESS_DURATION_MS}
       />
 
-      {/* Nota de Rodapé — flutuante na base, por cima da mídia */}
       {footerConfig && <FooterBar config={footerConfig} />}
 
-      {/* Connection Banner (flutuante, acima de tudo) */}
       <ConnectionBanner visible={!isConnected} />
 
       <HiddenMenu
