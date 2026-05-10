@@ -1,4 +1,4 @@
-// Iron Screens — Player Hook (Playlist Logic)
+// Iron Screens — Player Hook
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PlaybackItem, Media, MediaGroup } from '@/services/models';
 import { fetchPlaylistItems, fetchAllMediaForPlaylist, fetchMediaGroupItems, fetchMediaGroup } from '@/services/playlistService';
@@ -24,11 +24,15 @@ export interface PlayerActions {
   reload: () => Promise<void>;
 }
 
+/**
+ * Verifica compatível de orientação.
+ * Se a mídia não tem orientação definida (null/undefined/empty), aceita em qualquer terminal.
+ */
 function orientationMatch(
   mediaOrientation: string | null | undefined,
   terminalOrientation: string
 ): boolean {
-  if (!mediaOrientation) return true;
+  if (!mediaOrientation) return true; // sem orientação definida → aceita sempre
   return mediaOrientation === terminalOrientation;
 }
 
@@ -49,7 +53,11 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
 
   const buildPlaylist = useCallback(async (): Promise<PlaybackItem[]> => {
     const rawItems = await fetchPlaylistItems(terminalId);
-    if (!rawItems.length) return [];
+    if (!rawItems.length) {
+      console.log('[Player] Nenhum item de playlist encontrado para o terminal:', terminalId);
+      return [];
+    }
+    console.log('[Player] Items brutos da playlist:', rawItems.length);
 
     const directMediaIds = rawItems
       .filter((i) => i.item_type === 'media' && i.media_id)
@@ -64,14 +72,25 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     for (const item of rawItems) {
       if (item.item_type === 'media' && item.media_id) {
         const media = mediaMap[item.media_id];
-        if (!media) continue;
-        if (!orientationMatch(media.orientation, terminalOrientation)) continue;
+        if (!media) {
+          console.log('[Player] Mídia não encontrada no banco:', item.media_id);
+          continue;
+        }
+        if (!orientationMatch(media.orientation, terminalOrientation)) {
+          console.log(`[Player] Mídia descartada por orientação: "${media.name}" (mídia=${media.orientation}, terminal=${terminalOrientation})`);
+          continue;
+        }
+        if (!isScheduled(media)) {
+          console.log(`[Player] Mídia fora do agendamento: "${media.name}"`);
+          continue;
+        }
         expanded.push({
           playlistItemId: item.id,
           media,
           durationSec: item.duration_sec,
           groupId: null,
         });
+        console.log(`[Player] Mídia adicionada: "${media.name}" (${media.type}, orientação=${media.orientation ?? 'N/A'})`);
       } else if (item.item_type === 'group' && item.group_id) {
         const [group, groupItems] = await Promise.all([
           fetchMediaGroup(item.group_id),
@@ -80,13 +99,13 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
         if (!group || !groupItems.length) continue;
 
         const currentGroupIndex = groupIndicesRef.current[item.group_id] ?? 0;
-        let selectedItem: typeof groupItems[0] | undefined;
 
         const validItems = groupItems.filter(
           (gi) => gi.media && orientationMatch((gi.media as any).orientation, terminalOrientation)
         );
         if (!validItems.length) continue;
 
+        let selectedItem: typeof groupItems[0] | undefined;
         if (group.rotation_mode === 'random') {
           selectedItem = validItems[Math.floor(Math.random() * validItems.length)];
         } else {
@@ -104,10 +123,10 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
       }
     }
 
+    console.log('[Player] Playlist final:', expanded.length, 'itens');
     return expanded;
   }, [terminalId, terminalOrientation]);
 
-  // Carregamento inicial
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -130,7 +149,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalId, terminalOrientation]);
 
-  // loadPlaylist — mantém índice atual (usado por realtime, polling e reload manual)
   const loadPlaylist = useCallback(async () => {
     setError(null);
     try {
@@ -150,7 +168,7 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     }
   }, [buildPlaylist]);
 
-  // Heartbeat — mantém terminal online
+  // Heartbeat
   useEffect(() => {
     const heartbeat = setInterval(async () => {
       try {
@@ -163,13 +181,13 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     return () => clearInterval(heartbeat);
   }, [terminalId]);
 
-  // Polling periódico de playlist — garante sincronização mesmo se o Realtime falhar
+  // Polling periódico independente do Realtime
   useEffect(() => {
     const poll = setInterval(() => { loadPlaylist(); }, PLAYLIST_POLL_INTERVAL_MS);
     return () => clearInterval(poll);
   }, [loadPlaylist]);
 
-  // Realtime subscription — recarrega playlist em alterações
+  // Realtime
   useEffect(() => {
     const channel = supabase
       .channel(`terminal_${terminalId}`)
@@ -181,7 +199,7 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     return () => { supabase.removeChannel(channel); };
   }, [terminalId, loadPlaylist]);
 
-  // Cleanup ao desmontar — marca offline
+  // Cleanup
   useEffect(() => {
     return () => { setTerminalOffline(terminalId).catch(() => {}); };
   }, [terminalId]);
@@ -191,7 +209,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     if (!list.length) return;
 
     const current = list[currentIndexRef.current];
-
     if (current) {
       logDisplayEvent({
         media_id: current.media.id,
@@ -199,7 +216,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
         displayed_at: new Date().toISOString(),
         duration_sec: current.durationSec,
       });
-
       if (current.groupId) {
         const prevIdx = groupIndicesRef.current[current.groupId] ?? 0;
         groupIndicesRef.current[current.groupId] = prevIdx + 1;
@@ -210,7 +226,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     const nextIndex = (currentIndexRef.current + 1) % list.length;
     currentIndexRef.current = nextIndex;
     setCurrentIndex(nextIndex);
-
     const anyScheduled = list.some((i) => isScheduled(i.media));
     setHasNoScheduledMedia(!anyScheduled);
   }, [terminalId]);
