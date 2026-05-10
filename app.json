@@ -14,7 +14,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/Logo_menor_branco.png",
+        "foregroundImage": "./assets/images/Iron_icon.png",
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
