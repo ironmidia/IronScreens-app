@@ -1,21 +1,22 @@
 // Iron Screens — YouTube Renderer (Native)
-// Usa youtube-nocookie.com com iframe embed direto para evitar erro 152-4.
+// Carrega o embed do YouTube diretamente via source.uri (não HTML injetado),
+// com baseUrl https://www.youtube.com para que o player reconheça a origem.
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { buildYouTubeHtml } from '@/services/youtubeService';
+import { getYouTubeEmbedUrl } from '@/services/youtubeService';
 
 interface YoutubeRendererProps {
   videoId: string;
 }
 
 function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
-  const html = buildYouTubeHtml(videoId);
+  const uri = getYouTubeEmbedUrl(videoId);
 
   return (
     <View style={styles.container}>
       <WebView
-        source={{ html }}
+        source={{ uri }}
         style={styles.webview}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
@@ -30,6 +31,8 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
         originWhitelist={['*']}
         mixedContentMode="always"
         allowsProtectedMedia
+        sharedCookiesEnabled
+        thirdPartyCookiesEnabled
       />
     </View>
   );
