@@ -2,9 +2,10 @@
 import React, { memo } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Media } from '@/services/models';
-import { extractYouTubeId, buildYouTubeEmbedUrl } from '@/services/youtubeService';
+import { extractYouTubeId } from '@/services/youtubeService';
 import ImageRenderer from './ImageRenderer';
 import VideoRenderer from './VideoRenderer';
+import YoutubeRenderer from './YoutubeRenderer.native';
 import WebViewRenderer from './WebViewRenderer.native';
 
 interface MediaRendererProps {
@@ -26,7 +27,9 @@ function MediaRenderer({ media, onVideoEnd }: MediaRendererProps) {
       if (!media.external_url) return <View style={styles.black} />;
       const videoId = extractYouTubeId(media.external_url);
       if (!videoId) return <View style={styles.black} />;
-      return <WebViewRenderer uri={buildYouTubeEmbedUrl(videoId)} />;
+      // Usa YoutubeRenderer dedicado com IFrame API HTML injection
+      // para contornar a política de autoplay do YouTube em WebView Android
+      return <YoutubeRenderer videoId={videoId} />;
     }
 
     case 'external_link':
@@ -44,10 +47,7 @@ function MediaRenderer({ media, onVideoEnd }: MediaRendererProps) {
 }
 
 const styles = StyleSheet.create({
-  black: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
+  black: { flex: 1, backgroundColor: '#000' },
 });
 
 export default memo(MediaRenderer);
