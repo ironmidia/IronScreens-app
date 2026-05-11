@@ -1,31 +1,33 @@
 // Iron Screens — Image Renderer
 import React, { memo } from 'react';
-import { StyleSheet, Dimensions } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 
 interface ImageRendererProps {
   uri: string;
 }
 
-const { width, height } = Dimensions.get('window');
-
 function ImageRenderer({ uri }: ImageRendererProps) {
   return (
-    <Image
-      source={{ uri }}
-      style={styles.image}
-      contentFit="cover"
-      transition={0}
-      cachePolicy="memory-disk"
-    />
+    <View style={styles.container}>
+      <Image
+        source={{ uri }}
+        style={styles.image}
+        contentFit="cover"
+        transition={0}
+        cachePolicy="memory-disk"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  image: {
-    width,
-    height,
+  container: {
+    flex: 1,
     backgroundColor: '#000',
+  },
+  image: {
+    flex: 1,
   },
 });
 

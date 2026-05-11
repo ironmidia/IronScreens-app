@@ -1,13 +1,11 @@
 // Iron Screens — WebView Renderer (Native: iOS / Android)
 import React, { memo } from 'react';
-import { StyleSheet, Dimensions, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 interface WebViewRendererProps {
   uri: string;
 }
-
-const { width, height } = Dimensions.get('window');
 
 const INJECTED_JS = `
   document.body.style.margin = '0';
@@ -33,6 +31,7 @@ function WebViewRenderer({ uri }: WebViewRendererProps) {
         showsVerticalScrollIndicator={false}
         bounces={false}
         overScrollMode="never"
+        allowsFullscreenVideo={false}
       />
     </View>
   );
@@ -40,8 +39,7 @@ function WebViewRenderer({ uri }: WebViewRendererProps) {
 
 const styles = StyleSheet.create({
   container: {
-    width,
-    height,
+    flex: 1,
     backgroundColor: '#000',
   },
   webview: {
