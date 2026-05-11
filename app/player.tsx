@@ -32,6 +32,9 @@ async function applyOrientation(orientation: string) {
   }
 }
 
+// Tipos que avançam pelo evento onVideoEnd — todos os outros usam timer de duração
+const VIDEO_EVENT_TYPES = ['video'];
+
 export default function PlayerScreen() {
   useKeepAwake();
 
@@ -80,19 +83,24 @@ export default function PlayerScreen() {
     return () => sub.remove();
   }, [menuVisible]);
 
-  // Timer de avanço para imagens — respeita o duration_sec configurado no sistema
+  // Timer de avanço — respeitando o duration_sec configurado no sistema
+  // Apenas vídeos nativos avançam pelo onVideoEnd; todo o resto usa este timer.
   useEffect(() => {
     if (!currentItem) return;
-    // Vídeos avançam pelo evento onVideoEnd — não usa timer
-    if (currentItem.media.type === 'video') return;
+
+    // Vídeos nativos: avançam pelo evento onVideoEnd — não usa timer
+    if (VIDEO_EVENT_TYPES.includes(currentItem.media.type)) return;
 
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
 
-    const durationMs = (currentItem.durationSec ?? 10) * 1000;
-    console.log(`[Player] Timer imagem: ${currentItem.media.name} — ${durationMs}ms`);
+    // Garante que durationSec é número (Supabase pode retornar string)
+    const durationSec = Number(currentItem.durationSec) || 15;
+    const durationMs = durationSec * 1000;
+
+    console.log(`[Player] Timer: ${currentItem.media.name} (${currentItem.media.type}) — ${durationSec}s`);
 
     advanceTimerRef.current = setTimeout(() => {
-      advanceRef.current(); // usa sempre a versão mais recente do advance
+      advanceRef.current();
     }, durationMs);
 
     return () => {
@@ -101,7 +109,6 @@ export default function PlayerScreen() {
         advanceTimerRef.current = null;
       }
     };
-  // Recria o timer apenas quando muda a mídia ou a duração
   }, [currentItem?.media.id, currentItem?.playlistItemId, currentItem?.durationSec]);
 
   useEffect(() => {
