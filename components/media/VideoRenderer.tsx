@@ -51,7 +51,9 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
     return () => {
       subEnd.remove();
       subStatus.remove();
-      player.pause();
+      // O objeto nativo pode ser liberado antes do cleanup no Fabric (nova arquitetura).
+      // O try/catch evita o crash "shared object already released".
+      try { player.pause(); } catch (_) {}
     };
   }, [player, uri]);
 
@@ -69,8 +71,6 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
 }
 
 const styles = StyleSheet.create({
-  // flex:1 garante que o vídeo ocupe todo o espaço disponível
-  // independente da resolução da TV ou orientação
   container: {
     flex: 1,
     backgroundColor: '#000',
