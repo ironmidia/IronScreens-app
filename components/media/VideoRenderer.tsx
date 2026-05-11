@@ -32,27 +32,35 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
       }
     };
 
-    const subEnd = player.addListener('playToEnd', () => {
-      console.log('[VideoRenderer] Evento: playToEnd');
-      triggerEnd();
-    });
+    // Listeners podem falhar se o player já foi liberado (Fabric/nova arquitetura)
+    let subEnd: { remove: () => void } | null = null;
+    let subStatus: { remove: () => void } | null = null;
 
-    let hasStartedPlaying = false;
-    const subStatus = player.addListener('statusChange', ({ status }) => {
-      console.log('[VideoRenderer] Status:', status);
-      if (status === 'readyToPlay') hasStartedPlaying = true;
-      if (status === 'idle' && hasStartedPlaying) triggerEnd();
-      if (status === 'error') {
-        console.error('[VideoRenderer] Erro ao carregar vídeo:', uri);
-        setTimeout(() => triggerEnd(), 3_000);
-      }
-    });
+    try {
+      subEnd = player.addListener('playToEnd', () => {
+        console.log('[VideoRenderer] Evento: playToEnd');
+        triggerEnd();
+      });
+    } catch (_) {}
+
+    try {
+      let hasStartedPlaying = false;
+      subStatus = player.addListener('statusChange', ({ status }) => {
+        console.log('[VideoRenderer] Status:', status);
+        if (status === 'readyToPlay') hasStartedPlaying = true;
+        if (status === 'idle' && hasStartedPlaying) triggerEnd();
+        if (status === 'error') {
+          console.error('[VideoRenderer] Erro ao carregar vídeo:', uri);
+          setTimeout(() => triggerEnd(), 3_000);
+        }
+      });
+    } catch (_) {}
 
     return () => {
-      subEnd.remove();
-      subStatus.remove();
-      // O objeto nativo pode ser liberado antes do cleanup no Fabric (nova arquitetura).
-      // O try/catch evita o crash "shared object already released".
+      // Cada operação isolada em try/catch:
+      // o objeto nativo pode ser liberado antes do cleanup no Fabric.
+      try { subEnd?.remove(); } catch (_) {}
+      try { subStatus?.remove(); } catch (_) {}
       try { player.pause(); } catch (_) {}
     };
   }, [player, uri]);
