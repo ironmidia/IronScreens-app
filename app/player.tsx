@@ -66,28 +66,43 @@ export default function PlayerScreen() {
   const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
   const { currentItem, loading, hasNoScheduledMedia, isConnected } = playerState;
 
+  // Ref estável para o advance — evita stale closure no timer de duração
+  const advanceRef = useRef(playerActions.advance);
+  useEffect(() => { advanceRef.current = playerActions.advance; }, [playerActions.advance]);
+
   // Botão físico de voltar (Android TV controle remoto + smartphone)
-  // Se o menu estiver aberto, fecha. Se não, bloqueia saída do player.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (menuVisible) {
-        setMenuVisible(false);
-        return true; // consome o evento
-      }
-      return true; // bloqueia saída acidental do player
+      if (menuVisible) { setMenuVisible(false); return true; }
+      return true;
     });
     return () => sub.remove();
   }, [menuVisible]);
 
+  // Timer de avanço para imagens — respeita o duration_sec configurado no sistema
   useEffect(() => {
     if (!currentItem) return;
+    // Vídeos avançam pelo evento onVideoEnd — não usa timer
     if (currentItem.media.type === 'video') return;
+
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-    const durationMs = (currentItem.durationSec || 10) * 1000;
-    advanceTimerRef.current = setTimeout(() => { playerActions.advance(); }, durationMs);
-    return () => { if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current); };
-  }, [currentItem?.media.id, currentItem?.durationSec]);
+
+    const durationMs = (currentItem.durationSec ?? 10) * 1000;
+    console.log(`[Player] Timer imagem: ${currentItem.media.name} — ${durationMs}ms`);
+
+    advanceTimerRef.current = setTimeout(() => {
+      advanceRef.current(); // usa sempre a versão mais recente do advance
+    }, durationMs);
+
+    return () => {
+      if (advanceTimerRef.current) {
+        clearTimeout(advanceTimerRef.current);
+        advanceTimerRef.current = null;
+      }
+    };
+  // Recria o timer apenas quando muda a mídia ou a duração
+  }, [currentItem?.media.id, currentItem?.playlistItemId, currentItem?.durationSec]);
 
   useEffect(() => {
     if (!hasNoScheduledMedia) return;
@@ -109,7 +124,7 @@ export default function PlayerScreen() {
     if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
   }, []);
 
-  const handleVideoEnd = useCallback(() => { playerActions.advance(); }, [playerActions.advance]);
+  const handleVideoEnd = useCallback(() => { advanceRef.current(); }, []);
 
   const handleChangeTerminal = useCallback(async () => {
     setMenuVisible(false);
