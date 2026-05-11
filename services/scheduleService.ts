@@ -21,25 +21,39 @@ export function isScheduled(media: Media): boolean {
   const today = todayString();
   const dayAbbrev = DAY_ABBREVS[now.getDay()];
 
-  if (media.schedule_start && today < media.schedule_start) return false;
-  if (media.schedule_end && today > media.schedule_end) return false;
+  if (media.schedule_start && today < media.schedule_start) {
+    console.log(`[Schedule] "${media.name}" BLOQUEADO: hoje=${today} < start=${media.schedule_start}`);
+    return false;
+  }
+  if (media.schedule_end && today > media.schedule_end) {
+    console.log(`[Schedule] "${media.name}" BLOQUEADO: hoje=${today} > end=${media.schedule_end}`);
+    return false;
+  }
 
-  // Protção: schedule_days pode vir como null do banco (não apenas [])
   const days = media.schedule_days ?? [];
-  if (days.length > 0 && !days.includes(dayAbbrev)) return false;
+  if (days.length > 0 && !days.includes(dayAbbrev)) {
+    console.log(`[Schedule] "${media.name}" BLOQUEADO: dia=${dayAbbrev} não está em ${JSON.stringify(days)}`);
+    return false;
+  }
 
   if (media.schedule_time_start && media.schedule_time_end) {
     const startMin = toMinutes(media.schedule_time_start);
     const endMin   = toMinutes(media.schedule_time_end);
-    if (startMin === endMin) return true; // sem restrição
+    if (startMin === endMin) return true;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     if (startMin < endMin) {
-      if (nowMin < startMin || nowMin > endMin) return false;
+      if (nowMin < startMin || nowMin > endMin) {
+        console.log(`[Schedule] "${media.name}" BLOQUEADO: hora=${nowMin}min fora de [${startMin}-${endMin}]`);
+        return false;
+      }
     } else {
-      // Janela passa pela meia-noite
-      if (nowMin < startMin && nowMin > endMin) return false;
+      if (nowMin < startMin && nowMin > endMin) {
+        console.log(`[Schedule] "${media.name}" BLOQUEADO: hora=${nowMin}min fora de janela noturna [${startMin}-${endMin}]`);
+        return false;
+      }
     }
   }
 
+  console.log(`[Schedule] "${media.name}" OK: hoje=${today} dia=${dayAbbrev}`);
   return true;
 }
