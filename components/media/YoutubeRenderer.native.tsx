@@ -1,10 +1,14 @@
 // Iron Screens — YouTube Renderer (Native)
-// Carrega o embed do YouTube diretamente via source.uri (não HTML injetado),
-// com baseUrl https://www.youtube.com para que o player reconheça a origem.
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { getYouTubeEmbedUrl } from '@/services/youtubeService';
+
+// User-Agent de Chrome desktop — evita detecção de WebView pelo YouTube
+const DESKTOP_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+  'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/124.0.0.0 Safari/537.36';
 
 interface YoutubeRendererProps {
   videoId: string;
@@ -17,6 +21,7 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
     <View style={styles.container}>
       <WebView
         source={{ uri }}
+        userAgent={DESKTOP_UA}
         style={styles.webview}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
