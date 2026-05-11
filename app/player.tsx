@@ -32,7 +32,8 @@ async function applyOrientation(orientation: string) {
   }
 }
 
-// Tipos que avançam pelo evento onVideoEnd — todos os outros usam timer de duração
+// Tipos que avançam pelo evento onVideoEnd — não usam timer externo
+// O VideoRenderer já possui timer interno de durationSec, então o player.tsx não cria timer paralelo
 const VIDEO_EVENT_TYPES = ['video'];
 
 export default function PlayerScreen() {
@@ -69,11 +70,9 @@ export default function PlayerScreen() {
   const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
   const { currentItem, loading, hasNoScheduledMedia, isConnected } = playerState;
 
-  // Ref estável para o advance — evita stale closure no timer de duração
   const advanceRef = useRef(playerActions.advance);
   useEffect(() => { advanceRef.current = playerActions.advance; }, [playerActions.advance]);
 
-  // Botão físico de voltar (Android TV controle remoto + smartphone)
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -83,17 +82,14 @@ export default function PlayerScreen() {
     return () => sub.remove();
   }, [menuVisible]);
 
-  // Timer de avanço — respeitando o duration_sec configurado no sistema
-  // Apenas vídeos nativos avançam pelo onVideoEnd; todo o resto usa este timer.
+  // Timer de avanço — apenas para tipos que NÃO são vídeo nativo
+  // Vídeos nativos já têm o timer interno no VideoRenderer (durationSec)
   useEffect(() => {
     if (!currentItem) return;
-
-    // Vídeos nativos: avançam pelo evento onVideoEnd — não usa timer
     if (VIDEO_EVENT_TYPES.includes(currentItem.media.type)) return;
 
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
 
-    // Garante que durationSec é número (Supabase pode retornar string)
     const durationSec = Number(currentItem.durationSec) || 15;
     const durationMs = durationSec * 1000;
 
@@ -164,12 +160,15 @@ export default function PlayerScreen() {
           <EmptyScreen />
         ) : (
           <CrossfadeView triggerKey={currentItem.media.id + currentItem.playlistItemId}>
-            <MediaRenderer media={currentItem.media} onVideoEnd={handleVideoEnd} />
+            <MediaRenderer
+              media={currentItem.media}
+              durationSec={Number(currentItem.durationSec) || 15}
+              onVideoEnd={handleVideoEnd}
+            />
           </CrossfadeView>
         )}
       </View>
 
-      {/* Touch zone — long press 5s abre o menu oculto */}
       <Pressable
         style={[styles.touchZone, { bottom: footerHeight }]}
         onPressIn={handlePressIn}
