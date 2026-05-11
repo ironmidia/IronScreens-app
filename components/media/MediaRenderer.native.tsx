@@ -10,10 +10,11 @@ import WebViewRenderer from './WebViewRenderer.native';
 
 interface MediaRendererProps {
   media: Media;
+  durationSec?: number;
   onVideoEnd?: () => void;
 }
 
-function MediaRenderer({ media, onVideoEnd }: MediaRendererProps) {
+function MediaRenderer({ media, durationSec, onVideoEnd }: MediaRendererProps) {
   switch (media.type) {
     case 'image':
       if (!media.file_url) return <View style={styles.black} />;
@@ -21,14 +22,13 @@ function MediaRenderer({ media, onVideoEnd }: MediaRendererProps) {
 
     case 'video':
       if (!media.file_url) return <View style={styles.black} />;
-      return <VideoRenderer uri={media.file_url} onEnd={onVideoEnd} />;
+      // Passa durationSec para que o vídeo respeite o tempo configurado
+      return <VideoRenderer uri={media.file_url} durationSec={durationSec} onEnd={onVideoEnd} />;
 
     case 'youtube': {
       if (!media.external_url) return <View style={styles.black} />;
       const videoId = extractYouTubeId(media.external_url);
       if (!videoId) return <View style={styles.black} />;
-      // Usa YoutubeRenderer dedicado com IFrame API HTML injection
-      // para contornar a política de autoplay do YouTube em WebView Android
       return <YoutubeRenderer videoId={videoId} />;
     }
 

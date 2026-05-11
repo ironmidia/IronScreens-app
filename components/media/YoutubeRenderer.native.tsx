@@ -26,7 +26,10 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
         bounces={false}
         overScrollMode="never"
         allowsFullscreenVideo={false}
-        originWhitelist={['*']}
+        // originWhitelist amplo + sharedCookiesEnabled contornam o erro 152-4
+        originWhitelist={['https://*', 'http://*']}
+        sharedCookiesEnabled
+        thirdPartyCookiesEnabled
         mixedContentMode="always"
       />
     </View>

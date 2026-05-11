@@ -1,18 +1,21 @@
 // Iron Screens — Video Renderer (expo-video)
+// Avança ao fim natural do vídeo OU quando o durationSec configurado for atingido.
 import React, { memo, useRef, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 
 interface VideoRendererProps {
   uri: string;
+  durationSec?: number; // tempo máximo configurado no sistema
   onEnd?: () => void;
 }
 
-function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
+function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
   const onEndRef = useRef(onEnd);
   useEffect(() => { onEndRef.current = onEnd; }, [onEnd]);
 
   const endCalledRef = useRef(false);
+  const durationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const player = useVideoPlayer(uri, (p) => {
     p.loop = false;
@@ -22,17 +25,31 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
 
   useEffect(() => {
     endCalledRef.current = false;
-    console.log('[VideoRenderer] Iniciando vídeo:', uri);
 
     const triggerEnd = () => {
       if (!endCalledRef.current) {
         endCalledRef.current = true;
-        console.log('[VideoRenderer] Vídeo encerrado, avançando...');
+        console.log('[VideoRenderer] Avançando...');
+        // Cancela o timer de duração se o vídeo terminou antes
+        if (durationTimerRef.current) {
+          clearTimeout(durationTimerRef.current);
+          durationTimerRef.current = null;
+        }
         onEndRef.current?.();
       }
     };
 
-    // Listeners podem falhar se o player já foi liberado (Fabric/nova arquitetura)
+    // Timer de duração máxima — respeita o duration_sec configurado no sistema
+    // Garante que o vídeo não fica mais tempo que o configurado, independente do tamanho real
+    if (durationSec && durationSec > 0) {
+      const ms = Number(durationSec) * 1000;
+      console.log(`[VideoRenderer] Timer de duração máxima: ${durationSec}s`);
+      durationTimerRef.current = setTimeout(() => {
+        console.log('[VideoRenderer] Duração máxima atingida, avançando...');
+        triggerEnd();
+      }, ms);
+    }
+
     let subEnd: { remove: () => void } | null = null;
     let subStatus: { remove: () => void } | null = null;
 
@@ -46,7 +63,6 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
     try {
       let hasStartedPlaying = false;
       subStatus = player.addListener('statusChange', ({ status }) => {
-        console.log('[VideoRenderer] Status:', status);
         if (status === 'readyToPlay') hasStartedPlaying = true;
         if (status === 'idle' && hasStartedPlaying) triggerEnd();
         if (status === 'error') {
@@ -57,13 +73,15 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
     } catch (_) {}
 
     return () => {
-      // Cada operação isolada em try/catch:
-      // o objeto nativo pode ser liberado antes do cleanup no Fabric.
+      if (durationTimerRef.current) {
+        clearTimeout(durationTimerRef.current);
+        durationTimerRef.current = null;
+      }
       try { subEnd?.remove(); } catch (_) {}
       try { subStatus?.remove(); } catch (_) {}
       try { player.pause(); } catch (_) {}
     };
-  }, [player, uri]);
+  }, [player, uri, durationSec]);
 
   return (
     <View style={styles.container}>
@@ -79,13 +97,8 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  video: {
-    flex: 1,
-  },
+  container: { flex: 1, backgroundColor: '#000' },
+  video: { flex: 1 },
 });
 
 export default memo(VideoRenderer);

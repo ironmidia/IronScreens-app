@@ -22,8 +22,8 @@ export function extractYouTubeId(url: string): string | null {
 
 /**
  * Gera uma página HTML completa com YouTube IFrame API.
- * O player é iniciado programaticamente via JS para contornar
- * a política de autoplay do YouTube em WebView Android.
+ * - autoplay + mute para contornar política de autoplay Android
+ * - origin explícito em https://www.youtube.com resolve erro 152-4
  */
 export function buildYouTubeHtml(videoId: string): string {
   return `
@@ -59,14 +59,17 @@ export function buildYouTubeHtml(videoId: string): string {
           modestbranding: 1,
           iv_load_policy: 3,
           disablekb: 1,
+          origin: 'https://www.youtube.com',
         },
         events: {
           onReady: function(e) { e.target.playVideo(); },
           onStateChange: function(e) {
-            // Se pausou ou encerrou, reinicia
             if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
               e.target.playVideo();
             }
+          },
+          onError: function(e) {
+            console.log('YT Error: ' + e.data);
           },
         },
       });
