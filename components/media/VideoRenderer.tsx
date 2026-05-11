@@ -1,14 +1,12 @@
 // Iron Screens — Video Renderer (expo-video)
 import React, { memo, useRef, useEffect } from 'react';
-import { StyleSheet, View, Text, Dimensions } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 
 interface VideoRendererProps {
   uri: string;
   onEnd?: () => void;
 }
-
-const { width, height } = Dimensions.get('window');
 
 function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
   const onEndRef = useRef(onEnd);
@@ -42,16 +40,10 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
     let hasStartedPlaying = false;
     const subStatus = player.addListener('statusChange', ({ status }) => {
       console.log('[VideoRenderer] Status:', status);
-      if (status === 'readyToPlay') {
-        hasStartedPlaying = true;
-      }
-      if (status === 'idle' && hasStartedPlaying) {
-        triggerEnd();
-      }
-      // Detecta erro de carregamento
+      if (status === 'readyToPlay') hasStartedPlaying = true;
+      if (status === 'idle' && hasStartedPlaying) triggerEnd();
       if (status === 'error') {
         console.error('[VideoRenderer] Erro ao carregar vídeo:', uri);
-        // Avança playlist após 3s para não travar
         setTimeout(() => triggerEnd(), 3_000);
       }
     });
@@ -64,21 +56,27 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
   }, [player, uri]);
 
   return (
-    <VideoView
-      player={player}
-      style={styles.video}
-      contentFit="cover"
-      nativeControls={false}
-      allowsFullscreen={false}
-    />
+    <View style={styles.container}>
+      <VideoView
+        player={player}
+        style={styles.video}
+        contentFit="cover"
+        nativeControls={false}
+        allowsFullscreen={false}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  video: {
-    width,
-    height,
+  // flex:1 garante que o vídeo ocupe todo o espaço disponível
+  // independente da resolução da TV ou orientação
+  container: {
+    flex: 1,
     backgroundColor: '#000',
+  },
+  video: {
+    flex: 1,
   },
 });
 
