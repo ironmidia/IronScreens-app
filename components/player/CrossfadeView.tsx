@@ -1,20 +1,17 @@
 // Iron Screens — Crossfade Transition Container
 import React, { memo, useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Dimensions } from 'react-native';
+import { Animated, StyleSheet } from 'react-native';
 import { CROSSFADE_DURATION_MS } from '@/constants/config';
-
-const { width, height } = Dimensions.get('window');
 
 interface CrossfadeViewProps {
   children: React.ReactNode;
-  triggerKey: string; // changes when content changes → triggers fade
+  triggerKey: string;
 }
 
 function CrossfadeView({ children, triggerKey }: CrossfadeViewProps) {
   const opacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Fade out then in when key changes
     opacity.setValue(0);
     Animated.timing(opacity, {
       toValue: 1,
@@ -24,20 +21,10 @@ function CrossfadeView({ children, triggerKey }: CrossfadeViewProps) {
   }, [triggerKey]);
 
   return (
-    <Animated.View style={[styles.container, { opacity }]}>
+    <Animated.View style={[StyleSheet.absoluteFill, { opacity }]}>
       {children}
     </Animated.View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    width,
-    height,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-  },
-});
 
 export default memo(CrossfadeView);
