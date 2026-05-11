@@ -1,4 +1,5 @@
 // Iron Screens — YouTube Renderer (Native)
+// Usa youtube-nocookie.com com iframe embed direto para evitar erro 152-4.
 import React, { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -14,7 +15,7 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
   return (
     <View style={styles.container}>
       <WebView
-        source={{ html, baseUrl: 'https://www.youtube.com' }}
+        source={{ html }}
         style={styles.webview}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
@@ -26,11 +27,9 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
         bounces={false}
         overScrollMode="never"
         allowsFullscreenVideo={false}
-        // originWhitelist amplo + sharedCookiesEnabled contornam o erro 152-4
-        originWhitelist={['https://*', 'http://*']}
-        sharedCookiesEnabled
-        thirdPartyCookiesEnabled
+        originWhitelist={['*']}
         mixedContentMode="always"
+        allowsProtectedMedia
       />
     </View>
   );

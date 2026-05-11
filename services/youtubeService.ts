@@ -21,61 +21,33 @@ export function extractYouTubeId(url: string): string | null {
 }
 
 /**
- * Gera uma página HTML completa com YouTube IFrame API.
- * - autoplay + mute para contornar política de autoplay Android
- * - origin explícito em https://www.youtube.com resolve erro 152-4
+ * Gera HTML com <iframe> embed direto do YouTube.
+ * Não usa IFrame API (que exige origem cadastrada e causa erro 152-4).
+ * Parâmetros autoplay=1&mute=1 são suficientes para autoplay em WebView Android.
  */
 export function buildYouTubeHtml(videoId: string): string {
-  return `
-<!DOCTYPE html>
+  const embedUrl =
+    `https://www.youtube-nocookie.com/embed/${videoId}` +
+    `?autoplay=1&mute=1&controls=0&loop=1&playlist=${videoId}` +
+    `&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`;
+
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
-    #player { width: 100%; height: 100%; }
+    iframe { width: 100%; height: 100%; border: none; }
   </style>
 </head>
 <body>
-  <div id="player"></div>
-  <script>
-    var tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(tag);
-
-    var player;
-    function onYouTubeIframeAPIReady() {
-      player = new YT.Player('player', {
-        videoId: '${videoId}',
-        playerVars: {
-          autoplay: 1,
-          mute: 1,
-          controls: 0,
-          loop: 1,
-          playlist: '${videoId}',
-          playsinline: 1,
-          rel: 0,
-          modestbranding: 1,
-          iv_load_policy: 3,
-          disablekb: 1,
-          origin: 'https://www.youtube.com',
-        },
-        events: {
-          onReady: function(e) { e.target.playVideo(); },
-          onStateChange: function(e) {
-            if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) {
-              e.target.playVideo();
-            }
-          },
-          onError: function(e) {
-            console.log('YT Error: ' + e.data);
-          },
-        },
-      });
-    }
-  </script>
+  <iframe
+    src="${embedUrl}"
+    allow="autoplay; encrypted-media"
+    allowfullscreen="false"
+    frameborder="0"
+  ></iframe>
 </body>
-</html>
-`;
+</html>`;
 }
