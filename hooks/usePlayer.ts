@@ -1,63 +1,79 @@
 // Iron Screens — Player Hook
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PlaybackItem, Media, MediaGroup } from '@/services/models';
-import { fetchPlaylistItems, fetchAllMediaForPlaylist, fetchMediaGroupItems, fetchMediaGroup } from '@/services/playlistService';
+import {
+  fetchPlaylistItems,
+  fetchAllMediaForPlaylist,
+  fetchMediaGroupItems,
+  fetchMediaGroup,
+} from '@/services/playlistService';
 import { isScheduled } from '@/services/scheduleService';
 import { logDisplayEvent } from '@/services/displayEventService';
 import { setTerminalOnline, setTerminalOffline } from '@/services/terminalService';
-import { saveGroupIndices, loadGroupIndices } from '@/services/storageService';
+import {
+  saveGroupIndices,
+  loadGroupIndices,
+  savePlaylistCache,
+  loadPlaylistCache,
+} from '@/services/storageService';
 import { supabase } from '@/services/supabase';
 import { HEARTBEAT_INTERVAL_MS, PLAYLIST_POLL_INTERVAL_MS } from '@/constants/config';
 
 export interface PlayerState {
-  currentItem: PlaybackItem | null;
-  currentIndex: number;
-  playlist: PlaybackItem[];
-  loading: boolean;
-  error: string | null;
+  currentItem:         PlaybackItem | null;
+  currentIndex:        number;
+  playlist:            PlaybackItem[];
+  loading:             boolean;
+  error:               string | null;
   hasNoScheduledMedia: boolean;
-  isConnected: boolean;
+  isConnected:         boolean;
+  /** true quando a playlist está sendo servida do cache local (offline) */
+  isOfflineCache:      boolean;
 }
 
 export interface PlayerActions {
   advance: () => void;
-  reload: () => Promise<void>;
+  reload:  () => Promise<void>;
 }
 
 /**
- * Verifica compatível de orientação.
- * Se a mídia não tem orientação definida (null/undefined/empty), aceita em qualquer terminal.
+ * Verifica compatibilidade de orientação.
+ * Se a mídia não tem orientação definida, aceita em qualquer terminal.
  */
 function orientationMatch(
   mediaOrientation: string | null | undefined,
   terminalOrientation: string
 ): boolean {
-  if (!mediaOrientation) return true; // sem orientação definida → aceita sempre
+  if (!mediaOrientation) return true;
   return mediaOrientation === terminalOrientation;
 }
 
-export function usePlayer(terminalId: string, terminalOrientation: string): [PlayerState, PlayerActions] {
-  const [playlist, setPlaylist] = useState<PlaybackItem[]>([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export function usePlayer(
+  terminalId: string,
+  terminalOrientation: string
+): [PlayerState, PlayerActions] {
+  const [playlist,            setPlaylist]            = useState<PlaybackItem[]>([]);
+  const [currentIndex,        setCurrentIndex]        = useState(0);
+  const [loading,             setLoading]             = useState(true);
+  const [error,               setError]               = useState<string | null>(null);
   const [hasNoScheduledMedia, setHasNoScheduledMedia] = useState(false);
-  const [isConnected, setIsConnected] = useState(true);
+  const [isConnected,         setIsConnected]         = useState(true);
+  const [isOfflineCache,      setIsOfflineCache]      = useState(false);
 
-  const groupIndicesRef = useRef<Record<string, number>>({});
-  const playlistRef = useRef<PlaybackItem[]>([]);
-  const currentIndexRef = useRef(0);
+  const groupIndicesRef  = useRef<Record<string, number>>({});
+  const playlistRef      = useRef<PlaybackItem[]>([]);
+  const currentIndexRef  = useRef(0);
 
-  useEffect(() => { playlistRef.current = playlist; }, [playlist]);
+  useEffect(() => { playlistRef.current = playlist; },     [playlist]);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
+  // ─── Build playlist from Supabase ────────────────────────────────────────
   const buildPlaylist = useCallback(async (): Promise<PlaybackItem[]> => {
     const rawItems = await fetchPlaylistItems(terminalId);
     if (!rawItems.length) {
-      console.log('[Player] Nenhum item de playlist encontrado para o terminal:', terminalId);
+      console.log('[Player] Nenhum item de playlist para o terminal:', terminalId);
       return [];
     }
-    console.log('[Player] Items brutos da playlist:', rawItems.length);
 
     const directMediaIds = rawItems
       .filter((i) => i.item_type === 'media' && i.media_id)
@@ -72,25 +88,15 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     for (const item of rawItems) {
       if (item.item_type === 'media' && item.media_id) {
         const media = mediaMap[item.media_id];
-        if (!media) {
-          console.log('[Player] Mídia não encontrada no banco:', item.media_id);
-          continue;
-        }
-        if (!orientationMatch(media.orientation, terminalOrientation)) {
-          console.log(`[Player] Mídia descartada por orientação: "${media.name}" (mídia=${media.orientation}, terminal=${terminalOrientation})`);
-          continue;
-        }
-        if (!isScheduled(media)) {
-          console.log(`[Player] Mídia fora do agendamento: "${media.name}"`);
-          continue;
-        }
+        if (!media) continue;
+        if (!orientationMatch(media.orientation, terminalOrientation)) continue;
+        if (!isScheduled(media)) continue;
         expanded.push({
           playlistItemId: item.id,
           media,
           durationSec: item.duration_sec,
           groupId: null,
         });
-        console.log(`[Player] Mídia adicionada: "${media.name}" (${media.type}, orientação=${media.orientation ?? 'N/A'})`);
       } else if (item.item_type === 'group' && item.group_id) {
         const [group, groupItems] = await Promise.all([
           fetchMediaGroup(item.group_id),
@@ -99,7 +105,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
         if (!group || !groupItems.length) continue;
 
         const currentGroupIndex = groupIndicesRef.current[item.group_id] ?? 0;
-
         const validItems = groupItems.filter(
           (gi) => gi.media && orientationMatch((gi.media as any).orientation, terminalOrientation)
         );
@@ -111,7 +116,6 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
         } else {
           selectedItem = validItems[currentGroupIndex % validItems.length];
         }
-
         if (!selectedItem?.media) continue;
 
         expanded.push({
@@ -127,83 +131,104 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     return expanded;
   }, [terminalId, terminalOrientation]);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const items = await buildPlaylist();
-        setPlaylist(items);
-        setCurrentIndex(0);
-        currentIndexRef.current = 0;
-        const anyScheduled = items.some((i) => isScheduled(i.media));
-        setHasNoScheduledMedia(!anyScheduled);
-        setIsConnected(true);
-      } catch (err: any) {
-        setError(err.message || 'Erro ao carregar playlist');
-        setIsConnected(false);
-      } finally {
-        setLoading(false);
+  // ─── Load playlist (online) com fallback para cache offline ──────────────
+  const loadPlaylist = useCallback(async (isInitialLoad = false) => {
+    if (isInitialLoad) setLoading(true);
+    setError(null);
+
+    try {
+      const items = await buildPlaylist();
+
+      // Salva cache local sempre que carregar com sucesso
+      await savePlaylistCache(terminalId, items);
+
+      setPlaylist(items);
+      setCurrentIndex((prev) => {
+        const next = prev < items.length ? prev : 0;
+        currentIndexRef.current = next;
+        return next;
+      });
+      setHasNoScheduledMedia(!items.some((i) => isScheduled(i.media)));
+      setIsConnected(true);
+      setIsOfflineCache(false);
+    } catch (err: any) {
+      console.warn('[Player] Falha ao carregar playlist do Supabase:', err.message);
+      setIsConnected(false);
+
+      // Tenta carregar do cache local
+      const cached = await loadPlaylistCache(terminalId);
+      if (cached.length > 0) {
+        console.log('[Player] Usando cache offline:', cached.length, 'itens');
+        setPlaylist(cached);
+        setCurrentIndex((prev) => {
+          const next = prev < cached.length ? prev : 0;
+          currentIndexRef.current = next;
+          return next;
+        });
+        setHasNoScheduledMedia(!cached.some((i) => isScheduled(i.media)));
+        setIsOfflineCache(true);
+        setError(null); // sem erro visível — está reproduzindo normalmente
+      } else {
+        // Sem cache disponível: exibe erro
+        setError(err.message || 'Sem conexão e sem cache disponível.');
+        setIsOfflineCache(false);
       }
-    })();
+    } finally {
+      if (isInitialLoad) setLoading(false);
+    }
+  }, [buildPlaylist, terminalId]);
+
+  // ─── Carga inicial ────────────────────────────────────────────────────────
+  useEffect(() => {
+    loadPlaylist(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalId, terminalOrientation]);
 
-  const loadPlaylist = useCallback(async () => {
-    setError(null);
-    try {
-      const items = await buildPlaylist();
-      setPlaylist(items);
-      setCurrentIndex((prev) => {
-        const nextIdx = prev < items.length ? prev : 0;
-        currentIndexRef.current = nextIdx;
-        return nextIdx;
-      });
-      const anyScheduled = items.some((i) => isScheduled(i.media));
-      setHasNoScheduledMedia(!anyScheduled);
-      setIsConnected(true);
-    } catch (err: any) {
-      setError(err.message || 'Erro ao carregar playlist');
-      setIsConnected(false);
-    }
-  }, [buildPlaylist]);
-
-  // Heartbeat
+  // ─── Heartbeat ────────────────────────────────────────────────────────────
   useEffect(() => {
     const heartbeat = setInterval(async () => {
       try {
         await setTerminalOnline(terminalId);
-        setIsConnected(true);
+        // Se voltou a conectar e estava em cache, recarrega
+        if (!isConnected) {
+          setIsConnected(true);
+          loadPlaylist();
+        } else {
+          setIsConnected(true);
+        }
       } catch {
         setIsConnected(false);
       }
     }, HEARTBEAT_INTERVAL_MS);
     return () => clearInterval(heartbeat);
-  }, [terminalId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminalId, isConnected]);
 
-  // Polling periódico independente do Realtime
+  // ─── Polling periódico (independente do Realtime) ─────────────────────────
   useEffect(() => {
     const poll = setInterval(() => { loadPlaylist(); }, PLAYLIST_POLL_INTERVAL_MS);
     return () => clearInterval(poll);
   }, [loadPlaylist]);
 
-  // Realtime
+  // ─── Realtime ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
       .channel(`terminal_${terminalId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlist_items' }, () => { loadPlaylist(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'media' }, () => { loadPlaylist(); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'media_group_items' }, () => { loadPlaylist(); })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'terminals', filter: `id=eq.${terminalId}` }, () => { loadPlaylist(); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlist_items' },       () => loadPlaylist())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'media' },                () => loadPlaylist())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'media_group_items' },    () => loadPlaylist())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'terminals',
+        filter: `id=eq.${terminalId}` },                                                        () => loadPlaylist())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [terminalId, loadPlaylist]);
 
-  // Cleanup
+  // ─── Cleanup ──────────────────────────────────────────────────────────────
   useEffect(() => {
     return () => { setTerminalOffline(terminalId).catch(() => {}); };
   }, [terminalId]);
 
+  // ─── Advance ──────────────────────────────────────────────────────────────
   const advance = useCallback(async () => {
     const list = playlistRef.current;
     if (!list.length) return;
@@ -211,8 +236,8 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     const current = list[currentIndexRef.current];
     if (current) {
       logDisplayEvent({
-        media_id: current.media.id,
-        terminal_id: terminalId,
+        media_id:     current.media.id,
+        terminal_id:  terminalId,
         displayed_at: new Date().toISOString(),
         duration_sec: current.durationSec,
       });
@@ -226,10 +251,10 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
     const nextIndex = (currentIndexRef.current + 1) % list.length;
     currentIndexRef.current = nextIndex;
     setCurrentIndex(nextIndex);
-    const anyScheduled = list.some((i) => isScheduled(i.media));
-    setHasNoScheduledMedia(!anyScheduled);
+    setHasNoScheduledMedia(!list.some((i) => isScheduled(i.media)));
   }, [terminalId]);
 
+  // ─── Current item ─────────────────────────────────────────────────────────
   const currentItem = (() => {
     const list = playlistRef.current.length ? playlistRef.current : playlist;
     if (!list.length) return null;
@@ -241,7 +266,7 @@ export function usePlayer(terminalId: string, terminalOrientation: string): [Pla
   })();
 
   return [
-    { currentItem, currentIndex, playlist, loading, error, hasNoScheduledMedia, isConnected },
+    { currentItem, currentIndex, playlist, loading, error, hasNoScheduledMedia, isConnected, isOfflineCache },
     { advance, reload: loadPlaylist },
   ];
 }
