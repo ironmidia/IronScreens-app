@@ -23,6 +23,8 @@ export function useRemoteCommands({
   useEffect(() => {
     if (!terminalId) return;
 
+    console.log('[RemoteCmd] Inscrevendo canal para terminal:', terminalId);
+
     const channel = supabase
       .channel(`remote-cmd-${terminalId}`)
       .on('postgres_changes', {
@@ -34,6 +36,8 @@ export function useRemoteCommands({
         const newRow = payload.new as any;
         const cmd = newRow?.pending_command as string | null;
         if (!cmd) return;
+
+        console.log('[RemoteCmd] Comando recebido:', cmd);
 
         // Limpar o comando imediatamente para não re-executar
         await clearPendingCommand(terminalId);
@@ -75,15 +79,30 @@ export function useRemoteCommands({
 
           // SCREENSHOT: captura a tela e faz upload para Supabase Storage
           case 'SCREENSHOT':
-            if (captureScreenRef?.current) {
-              try {
-                const uri = await captureScreenRef.current();
-                if (uri) {
-                  await saveScreenshotUrl(terminalId, uri);
-                }
-              } catch (e) {
-                console.warn('[RemoteCmd] Screenshot falhou:', e);
+            if (!captureScreenRef?.current) {
+              console.warn('[RemoteCmd] captureScreenRef não disponível — player ainda não montado?');
+              break;
+            }
+            try {
+              console.log('[RemoteCmd] Executando captura de screenshot...');
+              const uri = await captureScreenRef.current();
+              if (uri) {
+                await saveScreenshotUrl(terminalId, uri);
+                console.log('[RemoteCmd] Screenshot salvo com sucesso:', uri);
+              } else {
+                console.error('[RemoteCmd] captureScreenRef retornou null — captura falhou');
+                // Registra timestamp de falha no banco para o painel exibir feedback
+                await supabase
+                  .from('terminals')
+                  .update({
+                    last_screenshot_at: new Date().toISOString(),
+                    last_screenshot_url: null,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', terminalId);
               }
+            } catch (e) {
+              console.error('[RemoteCmd] Screenshot falhou com exceção:', e);
             }
             break;
 
@@ -91,8 +110,13 @@ export function useRemoteCommands({
             console.warn('[RemoteCmd] Comando desconhecido:', cmd);
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[RemoteCmd] Status do canal:', status);
+      });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      console.log('[RemoteCmd] Removendo canal para terminal:', terminalId);
+      supabase.removeChannel(channel);
+    };
   }, [terminalId]);
 }
