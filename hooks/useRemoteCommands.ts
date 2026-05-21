@@ -39,26 +39,26 @@ export function useRemoteCommands({
         await clearPendingCommand(terminalId);
 
         switch (cmd) {
-          case 'RELOAD':
+          // RELOAD_PLAYLIST: recarrega a playlist sem reiniciar o app
+          case 'RELOAD_PLAYLIST':
             onReloadRef.current();
             break;
 
+          // RESTART: reinicia o app via expo-updates
           case 'RESTART':
-            // Tenta OTA update via expo-updates; se não houver update, reinicia o app
             try {
               const update = await Updates.checkForUpdateAsync();
               if (update.isAvailable) {
                 await Updates.fetchUpdateAsync();
-                await Updates.reloadAsync();
-              } else {
-                await Updates.reloadAsync();
               }
+              await Updates.reloadAsync();
             } catch {
-              // expo-updates indisponível (dev mode) — apenas recarrega playlist
+              // dev mode: expo-updates indisponível — apenas recarrega playlist
               onReloadRef.current();
             }
             break;
 
+          // UPDATE: verifica e aplica OTA update via expo-updates
           case 'UPDATE':
             try {
               const update = await Updates.checkForUpdateAsync();
@@ -73,6 +73,7 @@ export function useRemoteCommands({
             }
             break;
 
+          // SCREENSHOT: captura a tela e faz upload para Supabase Storage
           case 'SCREENSHOT':
             if (captureScreenRef?.current) {
               try {

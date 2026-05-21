@@ -1,6 +1,9 @@
-// Iron Screens — Terminal Service (expanded)
+// Iron Screens — Terminal Service
 import { supabase } from './supabase';
 import { Terminal } from './models';
+
+/** Tipos de comando remoto — sincronizados com o painel web */
+export type RemoteCommand = 'RELOAD_PLAYLIST' | 'RESTART' | 'SCREENSHOT' | 'UPDATE';
 
 /** Busca todos os terminais cadastrados */
 export async function fetchTerminals(): Promise<Terminal[]> {
@@ -23,7 +26,7 @@ export async function fetchTerminalById(terminalId: string): Promise<Terminal | 
   return data as Terminal;
 }
 
-/** Marca o terminal como online E atualiza last_heartbeat */
+/** Marca o terminal como online e atualiza last_heartbeat */
 export async function setTerminalOnline(terminalId: string): Promise<void> {
   const now = new Date().toISOString();
   const { error } = await supabase
@@ -37,7 +40,7 @@ export async function setTerminalOnline(terminalId: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Marca o terminal como offline (sem alterar last_heartbeat) */
+/** Marca o terminal como offline */
 export async function setTerminalOffline(terminalId: string): Promise<void> {
   const { error } = await supabase
     .from('terminals')
@@ -49,7 +52,7 @@ export async function setTerminalOffline(terminalId: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Atualiza os dados gerais do terminal (nome, tipo, orientação, cliente, localização) */
+/** Atualiza dados gerais do terminal (nome, tipo, orientação, cliente, localização) */
 export async function updateTerminal(
   terminalId: string,
   fields: Partial<Pick<Terminal, 'name' | 'type' | 'orientation' | 'client' | 'location'>>
@@ -62,8 +65,6 @@ export async function updateTerminal(
 }
 
 /** Envia um comando remoto para o terminal */
-export type RemoteCommand = 'RELOAD' | 'RESTART' | 'SCREENSHOT' | 'UPDATE';
-
 export async function sendRemoteCommand(
   terminalId: string,
   command: RemoteCommand,
