@@ -30,25 +30,17 @@ export default function RootLayout() {
     });
 
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      // Se estiver no player, voltar para setup ao pressionar 2x
       if (pathname === '/player') {
         if (backPressedOnce.current) {
           backPressedOnce.current = false;
           router.replace('/setup');
           return true;
         }
-
         backPressedOnce.current = true;
         ToastAndroid.show('Pressione voltar novamente para trocar o terminal', ToastAndroid.SHORT);
-
-        setTimeout(() => {
-          backPressedOnce.current = false;
-        }, 2000);
-
+        setTimeout(() => { backPressedOnce.current = false; }, 2000);
         return true;
       }
-
-      // Em qualquer outra tela, comportamento padrão
       return false;
     });
 
@@ -65,6 +57,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="setup" />
         <Stack.Screen name="player" />
+        <Stack.Screen name="terminals" />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
     </SafeAreaProvider>
