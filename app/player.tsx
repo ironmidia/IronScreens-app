@@ -37,33 +37,67 @@ async function applyOrientation(orientation: string) {
 // Tipos que avançam pelo evento onVideoEnd — não usam timer externo
 const VIDEO_EVENT_TYPES = ['video'];
 
-// Tenta capturar screenshot fazendo upload para Supabase Storage
-// e retornando a URL pública. Requer react-native-view-shot.
+/**
+ * Captura screenshot da view raiz e faz upload para o Supabase Storage.
+ * Requer react-native-view-shot instalado e linkado nativamente.
+ */
 async function captureAndUpload(
   terminalId: string,
   viewRef: React.RefObject<any>
 ): Promise<string | null> {
   try {
-    // Import dinâmico para não quebrar se a lib não estiver instalada
-    const { captureRef } = await import('react-native-view-shot');
-    const uri = await captureRef(viewRef, { format: 'jpg', quality: 0.7 });
+    console.log('[Screenshot] Iniciando captura para terminal:', terminalId);
 
-    // Ler o arquivo como blob
+    // Verifica se a ref está disponível
+    if (!viewRef.current) {
+      console.warn('[Screenshot] viewRef.current é null — view ainda não montada');
+      return null;
+    }
+
+    // Import dinâmico da lib
+    let captureRef: any;
+    try {
+      const mod = await import('react-native-view-shot');
+      captureRef = mod.captureRef;
+    } catch (importErr) {
+      console.error('[Screenshot] react-native-view-shot não disponível:', importErr);
+      return null;
+    }
+
+    // Aguarda 1 frame extra para garantir que o compositor nativo renderizou a view
+    await new Promise<void>(resolve => setTimeout(resolve, 300));
+
+    console.log('[Screenshot] Capturando view...');
+    const uri = await captureRef(viewRef, { format: 'jpg', quality: 0.7 });
+    console.log('[Screenshot] URI capturada:', uri);
+
+    // Lê o arquivo como blob
     const response = await fetch(uri);
+    if (!response.ok) {
+      console.error('[Screenshot] Falha ao ler URI capturada, status:', response.status);
+      return null;
+    }
     const blob = await response.blob();
+    console.log('[Screenshot] Blob gerado, tamanho:', blob.size, 'bytes');
+
     const fileName = `${terminalId}/latest.jpg`;
 
-    const { error } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from('screenshots')
       .upload(fileName, blob, { contentType: 'image/jpeg', upsert: true });
 
-    if (error) throw error;
+    if (uploadError) {
+      console.error('[Screenshot] Erro no upload Supabase Storage:', uploadError.message);
+      throw uploadError;
+    }
 
     const { data } = supabase.storage.from('screenshots').getPublicUrl(fileName);
-    // Adiciona cache-bust para forçar reload da imagem no painel
-    return `${data.publicUrl}?t=${Date.now()}`;
+    // Cache-bust para forçar reload da imagem no painel
+    const publicUrl = `${data.publicUrl}?t=${Date.now()}`;
+    console.log('[Screenshot] Upload concluído. URL pública:', publicUrl);
+    return publicUrl;
   } catch (e) {
-    console.warn('[Screenshot] Falhou:', e);
+    console.error('[Screenshot] Falhou com erro:', e);
     return null;
   }
 }
@@ -113,6 +147,7 @@ export default function PlayerScreen() {
   useEffect(() => {
     if (!terminalId) return;
     captureScreenRef.current = () => captureAndUpload(terminalId, rootViewRef);
+    console.log('[Player] captureScreenRef registrado para terminal:', terminalId);
   }, [terminalId]);
 
   // Listener de comandos remotos via Realtime
