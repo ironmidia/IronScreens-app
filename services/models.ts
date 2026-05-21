@@ -9,7 +9,15 @@ export interface Terminal {
   device_id: string | null;
   client: string | null;
   location: string | null;
-  setup_pin: string | null; // PIN de 5 chars gerado pelo sistema React
+  setup_pin: string | null;
+  last_heartbeat: string | null;
+  // Comandos remotos
+  pending_command: string | null;
+  command_payload: Record<string, unknown> | null;
+  command_sent_at: string | null;
+  // Screenshot
+  last_screenshot_url: string | null;
+  last_screenshot_at: string | null;
   created_at: string;
   updated_at: string;
 }
