@@ -1,14 +1,15 @@
-// Iron Screens — YouTube Renderer (Native)
-import React, { memo } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { WebView } from 'react-native-webview';
-import { getYouTubeEmbedUrl } from '@/services/youtubeService';
+import React, { memo } from "react";
+import { StyleSheet, View } from "react-native";
+import { WebView } from "react-native-webview";
+import { getYouTubeEmbedUrl } from "@/services/youtubeService";
 
-// User-Agent de Chrome desktop — evita detecção de WebView pelo YouTube
 const DESKTOP_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-  'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-  'Chrome/124.0.0.0 Safari/537.36';
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/124.0.0.0 Safari/537.36";
+
+const APP_REFERER = "https://com.ironscreens.app/";
+const APP_ORIGIN = "https://com.ironscreens.app";
 
 interface YoutubeRendererProps {
   videoId: string;
@@ -20,7 +21,13 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
   return (
     <View style={styles.container}>
       <WebView
-        source={{ uri }}
+        source={{
+          uri,
+          headers: {
+            Referer: APP_REFERER,
+            Origin: APP_ORIGIN,
+          },
+        }}
         userAgent={DESKTOP_UA}
         style={styles.webview}
         mediaPlaybackRequiresUserAction={false}
@@ -33,7 +40,7 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
         bounces={false}
         overScrollMode="never"
         allowsFullscreenVideo={false}
-        originWhitelist={['*']}
+        originWhitelist={["*"]}
         mixedContentMode="always"
         allowsProtectedMedia
         sharedCookiesEnabled
@@ -44,8 +51,8 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  webview: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1, backgroundColor: "#000" },
+  webview: { flex: 1, backgroundColor: "#000" },
 });
 
 export default memo(YoutubeRenderer);

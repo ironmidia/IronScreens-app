@@ -1,10 +1,6 @@
-// Iron Screens — Video Renderer (expo-video)
-// Vídeo avança somente no fim natural ou em erro.
-// Não corta vídeo por durationSec configurado.
-
-import React, { memo, useRef, useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import React, { memo, useRef, useEffect } from "react";
+import { StyleSheet, View } from "react-native";
+import { VideoView, useVideoPlayer } from "expo-video";
 
 interface VideoRendererProps {
   uri: string;
@@ -14,12 +10,12 @@ interface VideoRendererProps {
 
 function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
   const onEndRef = useRef(onEnd);
+  const endCalledRef = useRef(false);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     onEndRef.current = onEnd;
   }, [onEnd]);
-
-  const endCalledRef = useRef(false);
 
   const player = useVideoPlayer(uri, (p) => {
     p.loop = false;
@@ -29,56 +25,72 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
 
   useEffect(() => {
     endCalledRef.current = false;
-    console.log('[VideoRenderer] Montando vídeo:', uri);
+    console.log("[VideoRenderer] Montando vídeo:", uri);
 
     const triggerEnd = () => {
       if (!endCalledRef.current) {
         endCalledRef.current = true;
-        console.log('[VideoRenderer] Avançando (fim natural)');
+
+        if (watchdogRef.current) {
+          clearTimeout(watchdogRef.current);
+          watchdogRef.current = null;
+        }
+
+        console.log("[VideoRenderer] Avançando");
         onEndRef.current?.();
       }
     };
+
+    watchdogRef.current = setTimeout(() => {
+      console.warn("[VideoRenderer] Watchdog disparou, avançando por segurança");
+      triggerEnd();
+    }, 120000);
 
     let subEnd: { remove: () => void } | null = null;
     let subStatus: { remove: () => void } | null = null;
 
     try {
-      subEnd = player.addListener('playToEnd', () => {
-        console.log('[VideoRenderer] playToEnd');
+      subEnd = player.addListener("playToEnd", () => {
+        console.log("[VideoRenderer] playToEnd");
         triggerEnd();
       });
-    } catch (_) {}
+    } catch {}
 
     try {
       let started = false;
 
-      subStatus = player.addListener('statusChange', ({ status }) => {
-        if (status === 'readyToPlay') started = true;
+      subStatus = player.addListener("statusChange", ({ status }: any) => {
+        if (status === "readyToPlay") started = true;
 
-        if (status === 'idle' && started) {
-          console.log('[VideoRenderer] statusChange -> idle após iniciar');
+        if (status === "idle" && started) {
+          console.log("[VideoRenderer] statusChange -> idle após iniciar");
           triggerEnd();
         }
 
-        if (status === 'error') {
-          console.error('[VideoRenderer] Erro:', uri);
-          setTimeout(() => triggerEnd(), 3000);
+        if (status === "error") {
+          console.error("[VideoRenderer] Erro:", uri);
+          setTimeout(() => triggerEnd(), 1500);
         }
       });
-    } catch (_) {}
+    } catch {}
 
     return () => {
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+
       try {
         subEnd?.remove();
-      } catch (_) {}
+      } catch {}
 
       try {
         subStatus?.remove();
-      } catch (_) {}
+      } catch {}
 
       try {
         player.pause();
-      } catch (_) {}
+      } catch {}
     };
   }, [player, uri]);
 
@@ -89,14 +101,14 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
         style={styles.video}
         contentFit="cover"
         nativeControls={false}
-        allowsFullscreen={false}
+        fullscreenOptions={{ enable: false }}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1, backgroundColor: "#000" },
   video: { flex: 1 },
 });
 

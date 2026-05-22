@@ -1,4 +1,3 @@
-// Iron Screens — Fullscreen Player
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
@@ -43,13 +42,8 @@ async function applyOrientation(orientation: string) {
   }
 }
 
-// Tipos que avançam pelo evento onVideoEnd — não usam timer externo
 const VIDEO_EVENT_TYPES = ["video"];
 
-/**
- * Captura screenshot da view raiz e faz upload para o Supabase Storage.
- * Requer react-native-view-shot instalado e linkado nativamente.
- */
 async function captureAndUpload(
   terminalId: string,
   viewRef: React.RefObject<any>,
@@ -57,17 +51,15 @@ async function captureAndUpload(
   try {
     if (!viewRef.current) return null;
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     const uri = await captureRef(viewRef, { format: "jpg", quality: 0.7 });
     console.log("[Screenshot] URI capturada:", uri);
 
-    // ✅ Lê como base64 — único método confiável no Android com Expo 54
     const base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: FileSystem.EncodingType.Base64,
     });
 
-    // ✅ Converte base64 → Uint8Array sem biblioteca externa
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
@@ -102,15 +94,12 @@ export default function PlayerScreen() {
 
   const router = useRouter();
   const [terminalId, setTerminalId] = useState<string | null>(null);
-  const [terminalOrientation, setTerminalOrientation] =
-    useState<string>("horizontal");
+  const [terminalOrientation, setTerminalOrientation] = useState("horizontal");
   const [terminalName, setTerminalName] = useState<string | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [ready, setReady] = useState(false);
 
-  // Ref para a View raiz (usada pelo screenshot)
-  const rootViewRef = useRef<View>(null);
-
+  const rootViewRef = useRef<View | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -124,6 +113,7 @@ export default function PlayerScreen() {
         router.replace("/setup");
         return;
       }
+
       setTerminalId(tid);
       const resolvedOrientation = orientation || "horizontal";
       setTerminalOrientation(resolvedOrientation);
@@ -131,7 +121,9 @@ export default function PlayerScreen() {
       await applyOrientation(resolvedOrientation);
       setReady(true);
     }
+
     init();
+
     return () => {
       ScreenOrientation.unlockAsync();
     };
@@ -141,16 +133,24 @@ export default function PlayerScreen() {
     terminalId || "",
     terminalOrientation,
   );
-  const { currentItem, loading, hasNoScheduledMedia, isConnected } =
-    playerState;
+
+  const {
+    currentItem,
+    currentIndex,
+    playbackRevision,
+    loading,
+    hasNoScheduledMedia,
+    isConnected,
+  } = playerState;
 
   const advanceRef = useRef(playerActions.advance);
+
   useEffect(() => {
     advanceRef.current = playerActions.advance;
   }, [playerActions.advance]);
 
-  // Função de captura de tela — passada para o hook de comandos remotos
   const captureScreenRef = useRef<(() => Promise<string | null>) | null>(null);
+
   useEffect(() => {
     if (!terminalId) return;
     captureScreenRef.current = () => captureAndUpload(terminalId, rootViewRef);
@@ -160,19 +160,16 @@ export default function PlayerScreen() {
     );
   }, [terminalId]);
 
-  // ✅ DEPOIS: sobe o canal (já vai encontrar captureScreenRef preenchido)
   useRemoteCommands({
     terminalId,
     onReload: playerActions.reload,
     captureScreenRef,
   });
 
-  // PlayerScreen.tsx — adicionar este useEffect após o useRemoteCommands
   useEffect(() => {
     if (!terminalId) return;
 
     async function checkPendingOnMount() {
-      // Aguarda o captureScreenRef estar registrado
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const { data } = await supabase
@@ -186,11 +183,11 @@ export default function PlayerScreen() {
           "[Player] Comando pendente detectado no mount:",
           data.pending_command,
         );
-        // Limpa e executa
+
         await supabase
           .from("terminals")
           .update({ pending_command: null, pending_command_at: null })
-          .eq("id", terminalId!);
+          .eq("id", terminalId);
 
         const url = await captureScreenRef.current();
         if (url) {
@@ -200,7 +197,7 @@ export default function PlayerScreen() {
               last_screenshot_url: url,
               last_screenshot_at: new Date().toISOString(),
             })
-            .eq("id", terminalId!);
+            .eq("id", terminalId);
         }
       }
     }
@@ -210,6 +207,7 @@ export default function PlayerScreen() {
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
+
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (menuVisible) {
         setMenuVisible(false);
@@ -217,11 +215,10 @@ export default function PlayerScreen() {
       }
       return true;
     });
+
     return () => sub.remove();
   }, [menuVisible]);
 
-  // Timer de avanço — apenas para tipos que NÃO são vídeo nativo
-  // Timer de avanço — apenas para tipos que NÃO são vídeo nativo
   useEffect(() => {
     if (!currentItem) return;
     if (VIDEO_EVENT_TYPES.includes(currentItem.media.type)) return;
@@ -232,8 +229,6 @@ export default function PlayerScreen() {
     }
 
     const durationSec = Number(currentItem.durationSec) || 15;
-
-    // Compensa o tempo percebido perdido na transição visual
     const CROSSFADE_BUFFER_MS = 400;
     const durationMs = durationSec * 1000 + CROSSFADE_BUFFER_MS;
 
@@ -255,23 +250,28 @@ export default function PlayerScreen() {
     currentItem?.media.id,
     currentItem?.playlistItemId,
     currentItem?.durationSec,
+    playbackRevision,
   ]);
 
   useEffect(() => {
     if (!hasNoScheduledMedia) return;
+
     const interval = setInterval(() => {
       playerActions.reload();
     }, RECONNECT_INTERVAL_MS);
+
     return () => clearInterval(interval);
-  }, [hasNoScheduledMedia]);
+  }, [hasNoScheduledMedia, playerActions]);
 
   useEffect(() => {
     if (isConnected) return;
+
     const interval = setInterval(() => {
       if (terminalId) playerActions.reload();
     }, RECONNECT_INTERVAL_MS);
+
     return () => clearInterval(interval);
-  }, [isConnected, terminalId]);
+  }, [isConnected, terminalId, playerActions]);
 
   const handlePressIn = useCallback(() => {
     longPressTimerRef.current = setTimeout(() => {
@@ -299,57 +299,51 @@ export default function PlayerScreen() {
   const handleReload = useCallback(() => {
     setMenuVisible(false);
     playerActions.reload();
-  }, [playerActions.reload]);
+  }, [playerActions]);
 
   if (!ready || !terminalId) {
-    return (
-      <View style={styles.black}>
-        <ActivityIndicator color={Colors.Primary} size="large" />
-      </View>
-    );
+    return <View style={styles.root} />;
   }
 
   if (loading) {
     return (
       <View style={styles.black}>
-        <ActivityIndicator color={Colors.Primary} size="large" />
+        <ActivityIndicator size="large" color={Colors.Primary} />
         <Text style={styles.loadingText}>Carregando playlist...</Text>
       </View>
     );
   }
 
   return (
-    <View ref={rootViewRef} style={styles.root} collapsable={false}>
-      <View style={StyleSheet.absoluteFill}>
-        {hasNoScheduledMedia || !currentItem ? (
-          <EmptyScreen />
-        ) : (
-          <CrossfadeView
-            triggerKey={currentItem.media.id + currentItem.playlistItemId}
-          >
-            <MediaRenderer
-              media={currentItem.media}
-              durationSec={Number(currentItem.durationSec) || 15}
-              onVideoEnd={handleVideoEnd}
-            />
-          </CrossfadeView>
-        )}
-      </View>
+    <View ref={rootViewRef} style={styles.root}>
+      <ConnectionBanner visible={!isConnected} />
 
       <Pressable
         style={[styles.touchZone, { bottom: footerHeight }]}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        delayLongPress={LONG_PRESS_DURATION_MS}
-      />
+      >
+        {hasNoScheduledMedia || !currentItem ? (
+          <EmptyScreen />
+        ) : (
+          <CrossfadeView
+            triggerKey={`${playbackRevision}:${currentItem.playlistItemId}:${currentItem.media.id}:${currentIndex}`}
+          >
+            <MediaRenderer
+              key={`${playbackRevision}:${currentItem.playlistItemId}:${currentItem.media.id}:${currentIndex}`}
+              media={currentItem.media}
+              durationSec={currentItem.durationSec}
+              onVideoEnd={handleVideoEnd}
+            />
+          </CrossfadeView>
+        )}
+      </Pressable>
 
       {footerConfig && <FooterBar config={footerConfig} />}
 
-      <ConnectionBanner visible={!isConnected} />
-
       <HiddenMenu
         visible={menuVisible}
-        terminalName={terminalName}
+        terminalName={terminalName || "Terminal"}
         terminalId={terminalId}
         onClose={() => setMenuVisible(false)}
         onChangeTerminal={handleChangeTerminal}
