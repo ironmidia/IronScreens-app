@@ -28,7 +28,7 @@ import {
 } from "@/constants/config";
 import { supabase } from "@/services/supabase";
 import { captureRef } from "react-native-view-shot";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 
 async function applyOrientation(orientation: string) {
   if (orientation === "vertical") {

@@ -1,7 +1,6 @@
 // Iron Screens — Hook para escutar e executar comandos remotos no player
 import { useEffect, useRef } from "react";
-import { Alert } from "react-native";
-import * as Updates from "expo-updates";
+import { Alert, Platform } from "react-native";
 import { supabase } from "@/services/supabase";
 import { clearPendingCommand, saveScreenshotUrl } from "@/services/terminalService";
 
@@ -58,28 +57,38 @@ export function useRemoteCommands({
               break;
 
             case "RESTART":
-              try {
-                const update = await Updates.checkForUpdateAsync();
-                if (update.isAvailable) {
-                  await Updates.fetchUpdateAsync();
+              if (Platform.OS !== 'web') {
+                try {
+                  const Updates = await import('expo-updates');
+                  const update = await Updates.checkForUpdateAsync();
+                  if (update.isAvailable) {
+                    await Updates.fetchUpdateAsync();
+                  }
+                  await Updates.reloadAsync();
+                } catch {
+                  onReloadRef.current();
                 }
-                await Updates.reloadAsync();
-              } catch {
+              } else {
                 onReloadRef.current();
               }
               break;
 
             case "UPDATE":
-              try {
-                const update = await Updates.checkForUpdateAsync();
-                if (update.isAvailable) {
-                  await Updates.fetchUpdateAsync();
-                  await Updates.reloadAsync();
-                } else {
-                  Alert.alert("Atualização", "Nenhuma atualização disponível no momento.");
+              if (Platform.OS !== 'web') {
+                try {
+                  const Updates = await import('expo-updates');
+                  const update = await Updates.checkForUpdateAsync();
+                  if (update.isAvailable) {
+                    await Updates.fetchUpdateAsync();
+                    await Updates.reloadAsync();
+                  } else {
+                    Alert.alert("Atualização", "Nenhuma atualização disponível no momento.");
+                  }
+                } catch {
+                  Alert.alert("Atualização", "Não foi possível verificar atualizações.");
                 }
-              } catch {
-                Alert.alert("Atualização", "Não foi possível verificar atualizações.");
+              } else {
+                Alert.alert("Atualização", "Atualizações não suportadas nesta plataforma.");
               }
               break;
 
