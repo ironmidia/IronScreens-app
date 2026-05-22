@@ -1,5 +1,5 @@
 // Iron Screens — Fullscreen Player
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -8,34 +8,43 @@ import {
   Text,
   Platform,
   BackHandler,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import * as ScreenOrientation from 'expo-screen-orientation';
-import useKeepAwake from '@/hooks/useKeepAwake';
-import { loadTerminal, clearTerminal } from '@/services/storageService';
-import { usePlayer } from '@/hooks/usePlayer';
-import { useFooterBar } from '@/hooks/useFooterBar';
-import { useRemoteCommands } from '@/hooks/useRemoteCommands';
-import MediaRenderer from '@/components/media/MediaRenderer';
-import EmptyScreen from '@/components/player/EmptyScreen';
-import HiddenMenu from '@/components/player/HiddenMenu';
-import ConnectionBanner from '@/components/player/ConnectionBanner';
-import CrossfadeView from '@/components/player/CrossfadeView';
-import FooterBar, { BAR_HEIGHT } from '@/components/player/FooterBar';
-import { Colors, Typography, Spacing } from '@/constants/theme';
-import { LONG_PRESS_DURATION_MS, RECONNECT_INTERVAL_MS } from '@/constants/config';
-import { supabase } from '@/services/supabase';
+} from "react-native";
+import { useRouter } from "expo-router";
+import * as ScreenOrientation from "expo-screen-orientation";
+import { useKeepAwake } from "expo-keep-awake";
+import { loadTerminal, clearTerminal } from "@/services/storageService";
+import { usePlayer } from "@/hooks/usePlayer";
+import { useFooterBar } from "@/hooks/useFooterBar";
+import { useRemoteCommands } from "@/hooks/useRemoteCommands";
+import MediaRenderer from "@/components/media/MediaRenderer";
+import EmptyScreen from "@/components/player/EmptyScreen";
+import HiddenMenu from "@/components/player/HiddenMenu";
+import ConnectionBanner from "@/components/player/ConnectionBanner";
+import CrossfadeView from "@/components/player/CrossfadeView";
+import FooterBar, { BAR_HEIGHT } from "@/components/player/FooterBar";
+import { Colors, Typography, Spacing } from "@/constants/theme";
+import {
+  LONG_PRESS_DURATION_MS,
+  RECONNECT_INTERVAL_MS,
+} from "@/constants/config";
+import { supabase } from "@/services/supabase";
+import { captureRef } from "react-native-view-shot";
+import * as FileSystem from "expo-file-system/legacy";
 
 async function applyOrientation(orientation: string) {
-  if (orientation === 'vertical') {
-    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
+  if (orientation === "vertical") {
+    await ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.PORTRAIT,
+    );
   } else {
-    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    await ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.LANDSCAPE,
+    );
   }
 }
 
 // Tipos que avançam pelo evento onVideoEnd — não usam timer externo
-const VIDEO_EVENT_TYPES = ['video'];
+const VIDEO_EVENT_TYPES = ["video"];
 
 /**
  * Captura screenshot da view raiz e faz upload para o Supabase Storage.
@@ -43,61 +52,47 @@ const VIDEO_EVENT_TYPES = ['video'];
  */
 async function captureAndUpload(
   terminalId: string,
-  viewRef: React.RefObject<any>
+  viewRef: React.RefObject<any>,
 ): Promise<string | null> {
   try {
-    console.log('[Screenshot] Iniciando captura para terminal:', terminalId);
+    if (!viewRef.current) return null;
 
-    // Verifica se a ref está disponível
-    if (!viewRef.current) {
-      console.warn('[Screenshot] viewRef.current é null — view ainda não montada');
-      return null;
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+
+    const uri = await captureRef(viewRef, { format: "jpg", quality: 0.7 });
+    console.log("[Screenshot] URI capturada:", uri);
+
+    // ✅ Lê como base64 — único método confiável no Android com Expo 54
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    // ✅ Converte base64 → Uint8Array sem biblioteca externa
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
     }
-
-    // Import dinâmico da lib
-    let captureRef: any;
-    try {
-      const mod = await import('react-native-view-shot');
-      captureRef = mod.captureRef;
-    } catch (importErr) {
-      console.error('[Screenshot] react-native-view-shot não disponível:', importErr);
-      return null;
-    }
-
-    // Aguarda 1 frame extra para garantir que o compositor nativo renderizou a view
-    await new Promise<void>(resolve => setTimeout(resolve, 300));
-
-    console.log('[Screenshot] Capturando view...');
-    const uri = await captureRef(viewRef, { format: 'jpg', quality: 0.7 });
-    console.log('[Screenshot] URI capturada:', uri);
-
-    // Lê o arquivo como blob
-    const response = await fetch(uri);
-    if (!response.ok) {
-      console.error('[Screenshot] Falha ao ler URI capturada, status:', response.status);
-      return null;
-    }
-    const blob = await response.blob();
-    console.log('[Screenshot] Blob gerado, tamanho:', blob.size, 'bytes');
 
     const fileName = `${terminalId}/latest.jpg`;
+    const { error } = await supabase.storage
+      .from("screenshots")
+      .upload(fileName, bytes, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
 
-    const { error: uploadError } = await supabase.storage
-      .from('screenshots')
-      .upload(fileName, blob, { contentType: 'image/jpeg', upsert: true });
+    if (error) throw error;
 
-    if (uploadError) {
-      console.error('[Screenshot] Erro no upload Supabase Storage:', uploadError.message);
-      throw uploadError;
-    }
+    const { data } = supabase.storage
+      .from("screenshots")
+      .getPublicUrl(fileName);
 
-    const { data } = supabase.storage.from('screenshots').getPublicUrl(fileName);
-    // Cache-bust para forçar reload da imagem no painel
     const publicUrl = `${data.publicUrl}?t=${Date.now()}`;
-    console.log('[Screenshot] Upload concluído. URL pública:', publicUrl);
+    console.log("[Screenshot] Upload concluído:", publicUrl);
     return publicUrl;
   } catch (e) {
-    console.error('[Screenshot] Falhou com erro:', e);
+    console.error("[Screenshot] Falhou:", e);
     return null;
   }
 }
@@ -107,7 +102,8 @@ export default function PlayerScreen() {
 
   const router = useRouter();
   const [terminalId, setTerminalId] = useState<string | null>(null);
-  const [terminalOrientation, setTerminalOrientation] = useState<string>('horizontal');
+  const [terminalOrientation, setTerminalOrientation] =
+    useState<string>("horizontal");
   const [terminalName, setTerminalName] = useState<string | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [ready, setReady] = useState(false);
@@ -124,59 +120,126 @@ export default function PlayerScreen() {
   useEffect(() => {
     async function init() {
       const { terminalId: tid, orientation, name } = await loadTerminal();
-      if (!tid) { router.replace('/setup'); return; }
+      if (!tid) {
+        router.replace("/setup");
+        return;
+      }
       setTerminalId(tid);
-      const resolvedOrientation = orientation || 'horizontal';
+      const resolvedOrientation = orientation || "horizontal";
       setTerminalOrientation(resolvedOrientation);
       setTerminalName(name);
       await applyOrientation(resolvedOrientation);
       setReady(true);
     }
     init();
-    return () => { ScreenOrientation.unlockAsync(); };
+    return () => {
+      ScreenOrientation.unlockAsync();
+    };
   }, [router]);
 
-  const [playerState, playerActions] = usePlayer(terminalId || '', terminalOrientation);
-  const { currentItem, loading, hasNoScheduledMedia, isConnected } = playerState;
+  const [playerState, playerActions] = usePlayer(
+    terminalId || "",
+    terminalOrientation,
+  );
+  const { currentItem, loading, hasNoScheduledMedia, isConnected } =
+    playerState;
 
   const advanceRef = useRef(playerActions.advance);
-  useEffect(() => { advanceRef.current = playerActions.advance; }, [playerActions.advance]);
+  useEffect(() => {
+    advanceRef.current = playerActions.advance;
+  }, [playerActions.advance]);
 
   // Função de captura de tela — passada para o hook de comandos remotos
   const captureScreenRef = useRef<(() => Promise<string | null>) | null>(null);
   useEffect(() => {
     if (!terminalId) return;
     captureScreenRef.current = () => captureAndUpload(terminalId, rootViewRef);
-    console.log('[Player] captureScreenRef registrado para terminal:', terminalId);
+    console.log(
+      "[Player] captureScreenRef registrado para terminal:",
+      terminalId,
+    );
   }, [terminalId]);
 
-  // Listener de comandos remotos via Realtime
+  // ✅ DEPOIS: sobe o canal (já vai encontrar captureScreenRef preenchido)
   useRemoteCommands({
     terminalId,
     onReload: playerActions.reload,
     captureScreenRef,
   });
 
+  // PlayerScreen.tsx — adicionar este useEffect após o useRemoteCommands
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (menuVisible) { setMenuVisible(false); return true; }
+    if (!terminalId) return;
+
+    async function checkPendingOnMount() {
+      // Aguarda o captureScreenRef estar registrado
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const { data } = await supabase
+        .from("terminals")
+        .select("pending_command")
+        .eq("id", terminalId)
+        .single();
+
+      if (data?.pending_command === "SCREENSHOT" && captureScreenRef.current) {
+        console.log(
+          "[Player] Comando pendente detectado no mount:",
+          data.pending_command,
+        );
+        // Limpa e executa
+        await supabase
+          .from("terminals")
+          .update({ pending_command: null, pending_command_at: null })
+          .eq("id", terminalId!);
+
+        const url = await captureScreenRef.current();
+        if (url) {
+          await supabase
+            .from("terminals")
+            .update({
+              last_screenshot_url: url,
+              last_screenshot_at: new Date().toISOString(),
+            })
+            .eq("id", terminalId!);
+        }
+      }
+    }
+
+    checkPendingOnMount();
+  }, [terminalId]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (menuVisible) {
+        setMenuVisible(false);
+        return true;
+      }
       return true;
     });
     return () => sub.remove();
   }, [menuVisible]);
 
   // Timer de avanço — apenas para tipos que NÃO são vídeo nativo
+  // Timer de avanço — apenas para tipos que NÃO são vídeo nativo
   useEffect(() => {
     if (!currentItem) return;
     if (VIDEO_EVENT_TYPES.includes(currentItem.media.type)) return;
 
-    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
 
     const durationSec = Number(currentItem.durationSec) || 15;
-    const durationMs = durationSec * 1000;
 
-    console.log(`[Player] Timer: ${currentItem.media.name} (${currentItem.media.type}) — ${durationSec}s`);
+    // Compensa o tempo percebido perdido na transição visual
+    const CROSSFADE_BUFFER_MS = 400;
+    const durationMs = durationSec * 1000 + CROSSFADE_BUFFER_MS;
+
+    console.log(
+      `[Player] Timer: ${currentItem.media.name} (${currentItem.media.type}) — ${durationSec}s (+${CROSSFADE_BUFFER_MS}ms de buffer)`,
+    );
 
     advanceTimerRef.current = setTimeout(() => {
       advanceRef.current();
@@ -188,34 +251,49 @@ export default function PlayerScreen() {
         advanceTimerRef.current = null;
       }
     };
-  }, [currentItem?.media.id, currentItem?.playlistItemId, currentItem?.durationSec]);
+  }, [
+    currentItem?.media.id,
+    currentItem?.playlistItemId,
+    currentItem?.durationSec,
+  ]);
 
   useEffect(() => {
     if (!hasNoScheduledMedia) return;
-    const interval = setInterval(() => { playerActions.reload(); }, RECONNECT_INTERVAL_MS);
+    const interval = setInterval(() => {
+      playerActions.reload();
+    }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [hasNoScheduledMedia]);
 
   useEffect(() => {
     if (isConnected) return;
-    const interval = setInterval(() => { if (terminalId) playerActions.reload(); }, RECONNECT_INTERVAL_MS);
+    const interval = setInterval(() => {
+      if (terminalId) playerActions.reload();
+    }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isConnected, terminalId]);
 
   const handlePressIn = useCallback(() => {
-    longPressTimerRef.current = setTimeout(() => { setMenuVisible(true); }, LONG_PRESS_DURATION_MS);
+    longPressTimerRef.current = setTimeout(() => {
+      setMenuVisible(true);
+    }, LONG_PRESS_DURATION_MS);
   }, []);
 
   const handlePressOut = useCallback(() => {
-    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
   }, []);
 
-  const handleVideoEnd = useCallback(() => { advanceRef.current(); }, []);
+  const handleVideoEnd = useCallback(() => {
+    advanceRef.current();
+  }, []);
 
   const handleChangeTerminal = useCallback(async () => {
     setMenuVisible(false);
     await clearTerminal();
-    router.replace('/setup');
+    router.replace("/setup");
   }, [router]);
 
   const handleReload = useCallback(() => {
@@ -224,7 +302,11 @@ export default function PlayerScreen() {
   }, [playerActions.reload]);
 
   if (!ready || !terminalId) {
-    return <View style={styles.black}><ActivityIndicator color={Colors.Primary} size="large" /></View>;
+    return (
+      <View style={styles.black}>
+        <ActivityIndicator color={Colors.Primary} size="large" />
+      </View>
+    );
   }
 
   if (loading) {
@@ -242,7 +324,9 @@ export default function PlayerScreen() {
         {hasNoScheduledMedia || !currentItem ? (
           <EmptyScreen />
         ) : (
-          <CrossfadeView triggerKey={currentItem.media.id + currentItem.playlistItemId}>
+          <CrossfadeView
+            triggerKey={currentItem.media.id + currentItem.playlistItemId}
+          >
             <MediaRenderer
               media={currentItem.media}
               durationSec={Number(currentItem.durationSec) || 15}
@@ -278,13 +362,13 @@ export default function PlayerScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: "#000",
   },
   black: {
     flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#000",
+    alignItems: "center",
+    justifyContent: "center",
     gap: Spacing.md,
   },
   touchZone: {

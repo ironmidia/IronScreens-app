@@ -11,11 +11,9 @@ export interface Terminal {
   location: string | null;
   setup_pin: string | null;
   last_heartbeat: string | null;
-  // Comandos remotos
   pending_command: string | null;
   command_payload: Record<string, unknown> | null;
   command_sent_at: string | null;
-  // Screenshot
   last_screenshot_url: string | null;
   last_screenshot_at: string | null;
   created_at: string;
@@ -38,7 +36,8 @@ export interface Media {
   schedule_time_end: string | null;
   schedule_days: string[];
   created_at: string;
-  updated_at: string;
+  updated_at?: string | null;
+  local_file_url?: string | null;
 }
 
 export interface MediaGroup {
@@ -82,7 +81,6 @@ export interface DisplayEvent {
   duration_sec: number;
 }
 
-// Expanded playlist item ready for playback
 export interface PlaybackItem {
   playlistItemId: string;
   media: Media;
