@@ -1,4 +1,4 @@
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 
 const CACHE_DIR = `${FileSystem.documentDirectory}media-cache/`;
 const MANIFEST_PATH = `${CACHE_DIR}manifest.json`;
