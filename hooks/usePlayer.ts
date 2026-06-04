@@ -29,8 +29,8 @@ import { syncPlaylistMediaCache } from "@/services/mediaCacheService";
 export interface PlayerState {
   currentItem: PlaybackItem | null;
   currentIndex: number;
-  playbackRevision: number;
   playlist: PlaybackItem[];
+  playbackRevision: number;
   loading: boolean;
   error: string | null;
   hasNoScheduledMedia: boolean;
@@ -60,8 +60,17 @@ async function isInternetAvailable(): Promise<boolean> {
   }
 }
 
-function buildSignature(items: PlaybackItem[]) {
-  return items.map((i) => `${i.playlistItemId}:${i.media.id}`).join("|");
+function buildPlaylistSignature(items: PlaybackItem[]): string {
+  return JSON.stringify(
+    items.map((item) => [
+      item.playlistItemId,
+      item.media.id,
+      item.media.updated_at ?? null,
+      item.durationSec ?? null,
+      item.groupId ?? null,
+      item.media.local_file_url ?? null,
+    ]),
+  );
 }
 
 export function usePlayer(
@@ -80,8 +89,8 @@ export function usePlayer(
   const groupIndicesRef = useRef<Record<string, number>>({});
   const playlistRef = useRef<PlaybackItem[]>([]);
   const currentIndexRef = useRef(0);
-  const loadingPlaylistRef = useRef(false);
-  const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playlistSignatureRef = useRef("");
+  const loadInFlightRef = useRef(false);
 
   useEffect(() => {
     playlistRef.current = playlist;
@@ -167,137 +176,144 @@ export function usePlayer(
     return expanded;
   }, [terminalId, terminalOrientation]);
 
-  const hydrateWithLocalCache = useCallback(async (
-    items: PlaybackItem[],
-  ): Promise<PlaybackItem[]> => {
-    if (!items.length) return [];
+  const hydrateWithLocalCache = useCallback(
+    async (items: PlaybackItem[]): Promise<PlaybackItem[]> => {
+      if (!items.length) return [];
 
-    const localMap = await syncPlaylistMediaCache(
-      items.map((item) => ({
-        playlistItemId: item.playlistItemId,
-        media: {
-          id: item.media.id,
-          type: item.media.type,
-          file_url: item.media.file_url,
-          updated_at: item.media.updated_at ?? null,
-        },
-      })),
-    );
+      const localMap = await syncPlaylistMediaCache(
+        items.map((item) => ({
+          playlistItemId: item.playlistItemId,
+          media: {
+            id: item.media.id,
+            type: item.media.type,
+            file_url: item.media.file_url,
+            updated_at: item.media.updated_at ?? null,
+          },
+        })),
+      );
 
-    return items.map((item) => {
-      const key = `${item.playlistItemId}:${item.media.id}`;
-      const localUri = localMap[key] || null;
+      return items.map((item) => {
+        const key = `${item.playlistItemId}:${item.media.id}`;
+        const localUri = localMap[key] || null;
 
-      return {
-        ...item,
-        media: {
-          ...item.media,
-          local_file_url: localUri,
-        },
-      };
-    });
-  }, []);
+        return {
+          ...item,
+          media: {
+            ...item.media,
+            local_file_url: localUri,
+          },
+        };
+      });
+    },
+    [],
+  );
 
-  const applyPlaylistState = useCallback((items: PlaybackItem[], offline: boolean) => {
-    const previousList = playlistRef.current;
-    const previousCurrent =
-      previousList.length > 0 ? previousList[currentIndexRef.current] ?? null : null;
+  const applyPlaylistState = useCallback(
+    (
+      items: PlaybackItem[],
+      offline: boolean,
+      changed: boolean,
+    ) => {
+      if (changed) {
+        setPlaylist(items);
+        playlistRef.current = items;
 
-    const previousSignature = buildSignature(previousList);
-    const nextSignature = buildSignature(items);
-    const changed = previousSignature !== nextSignature;
+        setCurrentIndex((prev) => {
+          const prevItem = playlistRef.current[prev];
+          if (!prevItem) {
+            currentIndexRef.current = 0;
+            return 0;
+          }
 
-    setPlaylist(items);
-    playlistRef.current = items;
+          const foundIndex = items.findIndex(
+            (item) =>
+              item.playlistItemId === prevItem.playlistItemId &&
+              item.media.id === prevItem.media.id,
+          );
 
-    let nextIndex = 0;
+          const next = foundIndex >= 0 ? foundIndex : 0;
+          currentIndexRef.current = next;
+          return next;
+        });
 
-    if (items.length > 0) {
-      if (previousCurrent) {
-        const sameItemIndex = items.findIndex(
-          (i) =>
-            i.playlistItemId === previousCurrent.playlistItemId &&
-            i.media.id === previousCurrent.media.id,
-        );
+        setPlaybackRevision((rev) => rev + 1);
+      }
 
-        if (sameItemIndex >= 0) {
-          nextIndex = sameItemIndex;
-        } else {
-          nextIndex = Math.min(currentIndexRef.current, items.length - 1);
+      setHasNoScheduledMedia(!items.some((i) => isScheduled(i.media)));
+      setIsOfflineCache(offline);
+      setError(null);
+    },
+    [],
+  );
+
+  const loadPlaylist = useCallback(
+    async (isInitialLoad = false) => {
+      if (!terminalId) return;
+      if (loadInFlightRef.current) return;
+
+      loadInFlightRef.current = true;
+
+      if (isInitialLoad) setLoading(true);
+      setError(null);
+
+      try {
+        const online = await isInternetAvailable();
+
+        if (!online) {
+          throw new Error("Sem internet para sincronizar.");
         }
-      } else {
-        nextIndex = Math.min(currentIndexRef.current, items.length - 1);
+
+        const built = await buildPlaylist();
+        const hydrated = await hydrateWithLocalCache(built);
+
+        await savePlaylistCache(terminalId, hydrated);
+
+        const nextSignature = buildPlaylistSignature(hydrated);
+        const changed = nextSignature !== playlistSignatureRef.current;
+
+        if (changed) {
+          playlistSignatureRef.current = nextSignature;
+          console.log("[Player] Mudança real na playlist detectada; aplicando estado");
+        } else {
+          console.log("[Player] Playlist idêntica; ignorando reaplicação de estado");
+        }
+
+        applyPlaylistState(hydrated, false, changed);
+        setIsConnected(true);
+      } catch (err: any) {
+        console.warn("[Player] Falha ao carregar online:", err?.message);
+        setIsConnected(false);
+
+        const cached = await loadPlaylistCache(terminalId);
+
+        if (cached.length > 0) {
+          console.log("[Player] Usando cache offline:", cached.length, "itens");
+
+          const nextSignature = buildPlaylistSignature(cached);
+          const changed = nextSignature !== playlistSignatureRef.current;
+
+          if (changed) {
+            playlistSignatureRef.current = nextSignature;
+          }
+
+          applyPlaylistState(cached, true, changed);
+        } else {
+          setError(err?.message || "Sem conexão e sem cache disponível.");
+          setIsOfflineCache(false);
+        }
+      } finally {
+        loadInFlightRef.current = false;
+        if (isInitialLoad) setLoading(false);
       }
-    }
-
-    currentIndexRef.current = nextIndex;
-    setCurrentIndex(nextIndex);
-
-    if (changed) {
-      setPlaybackRevision((r) => r + 1);
-    }
-
-    setHasNoScheduledMedia(items.length === 0);
-    setIsOfflineCache(offline);
-    setError(null);
-  }, []);
-
-  const loadPlaylist = useCallback(async (isInitialLoad = false) => {
-    if (!terminalId) return;
-    if (loadingPlaylistRef.current) return;
-
-    loadingPlaylistRef.current = true;
-
-    if (isInitialLoad) setLoading(true);
-    setError(null);
-
-    try {
-      const online = await isInternetAvailable();
-
-      if (!online) {
-        throw new Error("Sem internet para sincronizar.");
-      }
-
-      const built = await buildPlaylist();
-      const hydrated = await hydrateWithLocalCache(built);
-
-      await savePlaylistCache(terminalId, hydrated);
-
-      applyPlaylistState(hydrated, false);
-      setIsConnected(true);
-    } catch (err: any) {
-      console.warn("[Player] Falha ao carregar online:", err?.message);
-      setIsConnected(false);
-
-      const cached = await loadPlaylistCache(terminalId);
-
-      if (cached.length > 0) {
-        console.log("[Player] Usando cache offline:", cached.length, "itens");
-        applyPlaylistState(cached, true);
-      } else {
-        setError(err?.message || "Sem conexão e sem cache disponível.");
-        setIsOfflineCache(false);
-      }
-    } finally {
-      loadingPlaylistRef.current = false;
-      if (isInitialLoad) setLoading(false);
-    }
-  }, [terminalId, buildPlaylist, hydrateWithLocalCache, applyPlaylistState]);
-
-  const scheduleReload = useCallback(() => {
-    if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current);
-    reloadTimeoutRef.current = setTimeout(() => {
-      loadPlaylist();
-    }, 800);
-  }, [loadPlaylist]);
+    },
+    [terminalId, buildPlaylist, hydrateWithLocalCache, applyPlaylistState],
+  );
 
   useEffect(() => {
     loadPlaylist(true);
   }, [loadPlaylist]);
 
   useEffect(() => {
-    if (!terminalId) return;
-
     const heartbeat = setInterval(async () => {
       try {
         await setTerminalOnline(terminalId);
@@ -315,34 +331,30 @@ export function usePlayer(
   }, [terminalId, isOfflineCache, loadPlaylist]);
 
   useEffect(() => {
-    if (!terminalId) return;
-
     const poll = setInterval(() => {
-      scheduleReload();
+      loadPlaylist();
     }, PLAYLIST_POLL_INTERVAL_MS);
 
     return () => clearInterval(poll);
-  }, [terminalId, scheduleReload]);
+  }, [loadPlaylist]);
 
   useEffect(() => {
-    if (!terminalId) return;
-
     const channel = supabase
       .channel(`terminal_${terminalId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "playlist_items" },
-        () => scheduleReload(),
+        () => loadPlaylist(),
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "media" },
-        () => scheduleReload(),
+        () => loadPlaylist(),
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "media_group_items" },
-        () => scheduleReload(),
+        () => loadPlaylist(),
       )
       .on(
         "postgres_changes",
@@ -352,21 +364,18 @@ export function usePlayer(
           table: "terminals",
           filter: `id=eq.${terminalId}`,
         },
-        () => scheduleReload(),
+        () => loadPlaylist(),
       )
       .subscribe();
 
     return () => {
-      if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current);
       supabase.removeChannel(channel);
     };
-  }, [terminalId, scheduleReload]);
+  }, [terminalId, loadPlaylist]);
 
   useEffect(() => {
     return () => {
-      if (terminalId) {
-        setTerminalOffline(terminalId).catch(() => {});
-      }
+      setTerminalOffline(terminalId).catch(() => {});
     };
   }, [terminalId]);
 
@@ -374,12 +383,7 @@ export function usePlayer(
     const list = playlistRef.current;
     if (!list.length) return;
 
-    const safeCurrentIndex =
-      currentIndexRef.current >= 0 && currentIndexRef.current < list.length
-        ? currentIndexRef.current
-        : 0;
-
-    const current = list[safeCurrentIndex];
+    const current = list[currentIndexRef.current];
 
     if (current) {
       logDisplayEvent({
@@ -396,31 +400,30 @@ export function usePlayer(
       }
     }
 
-    const nextIndex = list.length > 0 ? (safeCurrentIndex + 1) % list.length : 0;
+    const nextIndex = (currentIndexRef.current + 1) % list.length;
     currentIndexRef.current = nextIndex;
     setCurrentIndex(nextIndex);
-    setPlaybackRevision((r) => r + 1);
-    setHasNoScheduledMedia(list.length === 0);
+    setHasNoScheduledMedia(!list.some((i) => isScheduled(i.media)));
   }, [terminalId]);
 
   const currentItem = (() => {
     const list = playlistRef.current.length ? playlistRef.current : playlist;
     if (!list.length) return null;
 
-    const idx =
-      currentIndexRef.current >= 0 && currentIndexRef.current < list.length
-        ? currentIndexRef.current
-        : 0;
+    for (let i = 0; i < list.length; i++) {
+      const idx = (currentIndexRef.current + i) % list.length;
+      if (isScheduled(list[idx].media)) return list[idx];
+    }
 
-    return list[idx] ?? list[0] ?? null;
+    return null;
   })();
 
   return [
     {
       currentItem,
       currentIndex,
-      playbackRevision,
       playlist,
+      playbackRevision,
       loading,
       error,
       hasNoScheduledMedia,

@@ -4,7 +4,7 @@ export const APP_VERSION = '1.0.0';
 
 export const HEARTBEAT_INTERVAL_MS      = 60_000;  // 60 segundos
 export const RECONNECT_INTERVAL_MS      = 10_000;  // 10 segundos
-export const PLAYLIST_POLL_INTERVAL_MS  = 30_000;  // 30 segundos
+export const PLAYLIST_POLL_INTERVAL_MS  = 30 * 60 * 1000;  // 30 minutos
 export const LONG_PRESS_DURATION_MS     = 5_000;   // 5 segundos
 export const CROSSFADE_DURATION_MS      = 300;
 

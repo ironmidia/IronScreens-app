@@ -8,10 +8,36 @@ interface VideoRendererProps {
   onEnd?: () => void;
 }
 
-function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
+const IDLE_RECOVERY_DELAY_MS = 900;
+const ERROR_ADVANCE_DELAY_MS = 700;
+const END_TOLERANCE_SEC = 0.05;
+
+function getDynamicWatchdogMs(params: {
+  durationSec?: number;
+  realDurationSec?: number;
+}) {
+  const baseSec =
+    params.realDurationSec && params.realDurationSec > 0
+      ? params.realDurationSec
+      : params.durationSec && params.durationSec > 0
+        ? params.durationSec
+        : 15;
+
+  return Math.max(8000, Math.min((baseSec + 2) * 1000, 120000));
+}
+
+function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
   const onEndRef = useRef(onEnd);
   const endCalledRef = useRef(false);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleRecoveryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const startedRef = useRef(false);
+  const progressedRef = useRef(false);
+  const currentTimeRef = useRef(0);
+  const durationRef = useRef(0);
+  const watchdogStartedAtRef = useRef<number | null>(null);
+  const watchdogMsRef = useRef(0);
 
   useEffect(() => {
     onEndRef.current = onEnd;
@@ -25,29 +51,121 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
 
   useEffect(() => {
     endCalledRef.current = false;
+    startedRef.current = false;
+    progressedRef.current = false;
+    currentTimeRef.current = 0;
+    durationRef.current = 0;
+    watchdogStartedAtRef.current = null;
+    watchdogMsRef.current = 0;
+
     console.log("[VideoRenderer] Montando vídeo:", uri);
 
-    const triggerEnd = () => {
-      if (!endCalledRef.current) {
-        endCalledRef.current = true;
+    const clearAllTimers = () => {
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
 
-        if (watchdogRef.current) {
-          clearTimeout(watchdogRef.current);
-          watchdogRef.current = null;
-        }
-
-        console.log("[VideoRenderer] Avançando");
-        onEndRef.current?.();
+      if (idleRecoveryRef.current) {
+        clearTimeout(idleRecoveryRef.current);
+        idleRecoveryRef.current = null;
       }
     };
 
-    watchdogRef.current = setTimeout(() => {
-      console.warn("[VideoRenderer] Watchdog disparou, avançando por segurança");
-      triggerEnd();
-    }, 120000);
+    const triggerEnd = () => {
+      if (endCalledRef.current) return;
+
+      endCalledRef.current = true;
+      clearAllTimers();
+      console.log("[VideoRenderer] Avançando");
+      onEndRef.current?.();
+    };
+
+    const isNearEnd = () => {
+      const duration = Number(durationRef.current) || 0;
+      const currentTime = Number(currentTimeRef.current) || 0;
+
+      if (!duration || duration <= 0) return false;
+
+      return currentTime >= duration - END_TOLERANCE_SEC;
+    };
+
+    const armWatchdog = (realDurationSec?: number) => {
+      if (endCalledRef.current) return;
+
+      const timeoutMs = getDynamicWatchdogMs({
+        durationSec,
+        realDurationSec,
+      });
+
+      const sameTimeout = timeoutMs === watchdogMsRef.current;
+      if (sameTimeout && watchdogRef.current) return;
+
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+
+      watchdogMsRef.current = timeoutMs;
+      watchdogStartedAtRef.current = Date.now();
+
+      console.log("[VideoRenderer] Watchdog armado:", timeoutMs, "ms");
+
+      watchdogRef.current = setTimeout(() => {
+        console.warn("[VideoRenderer] Watchdog disparou, avançando por segurança");
+        triggerEnd();
+      }, timeoutMs);
+    };
+
+    const scheduleIdleRecovery = () => {
+      if (endCalledRef.current || idleRecoveryRef.current) return;
+
+      idleRecoveryRef.current = setTimeout(() => {
+        idleRecoveryRef.current = null;
+        if (endCalledRef.current) return;
+
+        if (isNearEnd()) {
+          console.log(
+            "[VideoRenderer] Idle detectado já no final; aguardando flush curto",
+          );
+
+          setTimeout(() => {
+            if (!endCalledRef.current) {
+              triggerEnd();
+            }
+          }, 250);
+
+          return;
+        }
+
+        console.warn(
+          "[VideoRenderer] Idle fora do fim; tentando recover com play()",
+        );
+
+        try {
+          player.play();
+        } catch {}
+
+        setTimeout(() => {
+          if (endCalledRef.current) return;
+
+          const stillNoProgress = currentTimeRef.current <= 0.05;
+          if (stillNoProgress) {
+            console.warn(
+              "[VideoRenderer] Sem progresso após recover; avançando",
+            );
+            triggerEnd();
+          }
+        }, 1200);
+      }, IDLE_RECOVERY_DELAY_MS);
+    };
+
+    armWatchdog();
 
     let subEnd: { remove: () => void } | null = null;
     let subStatus: { remove: () => void } | null = null;
+    let subTime: { remove: () => void } | null = null;
+    let subPlaying: { remove: () => void } | null = null;
 
     try {
       subEnd = player.addListener("playToEnd", () => {
@@ -57,28 +175,67 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
     } catch {}
 
     try {
-      let started = false;
+      subTime = player.addListener(
+        "timeUpdate",
+        ({ currentTime, duration }: any) => {
+          currentTimeRef.current = Number(currentTime) || 0;
 
+          const nextDuration = Number(duration) || 0;
+          const prevDuration = durationRef.current || 0;
+
+          if (nextDuration > 0) {
+            durationRef.current = nextDuration;
+
+            if (Math.abs(nextDuration - prevDuration) > 0.2) {
+              armWatchdog(nextDuration);
+            }
+          }
+
+          if (currentTimeRef.current > 0.05) {
+            startedRef.current = true;
+            progressedRef.current = true;
+
+            if (idleRecoveryRef.current) {
+              clearTimeout(idleRecoveryRef.current);
+              idleRecoveryRef.current = null;
+            }
+          }
+        },
+      );
+    } catch {}
+
+    try {
+      subPlaying = player.addListener("playingChange", ({ isPlaying }: any) => {
+        if (isPlaying) {
+          startedRef.current = true;
+        }
+      });
+    } catch {}
+
+    try {
       subStatus = player.addListener("statusChange", ({ status }: any) => {
-        if (status === "readyToPlay") started = true;
+        console.log("[VideoRenderer] statusChange:", status);
 
-        if (status === "idle" && started) {
-          console.log("[VideoRenderer] statusChange -> idle após iniciar");
-          triggerEnd();
+        if (status === "readyToPlay") {
+          try {
+            player.play();
+          } catch {}
+        }
+
+        if (status === "idle" && (startedRef.current || progressedRef.current)) {
+          console.warn("[VideoRenderer] statusChange -> idle após iniciar");
+          scheduleIdleRecovery();
         }
 
         if (status === "error") {
           console.error("[VideoRenderer] Erro:", uri);
-          setTimeout(() => triggerEnd(), 1500);
+          setTimeout(() => triggerEnd(), ERROR_ADVANCE_DELAY_MS);
         }
       });
     } catch {}
 
     return () => {
-      if (watchdogRef.current) {
-        clearTimeout(watchdogRef.current);
-        watchdogRef.current = null;
-      }
+      clearAllTimers();
 
       try {
         subEnd?.remove();
@@ -89,10 +246,18 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
       } catch {}
 
       try {
+        subTime?.remove();
+      } catch {}
+
+      try {
+        subPlaying?.remove();
+      } catch {}
+
+      try {
         player.pause();
       } catch {}
     };
-  }, [player, uri]);
+  }, [player, uri, durationSec]);
 
   return (
     <View style={styles.container}>
@@ -109,7 +274,7 @@ function VideoRenderer({ uri, onEnd }: VideoRendererProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
-  video: { flex: 1 },
+  video: { flex: 1, backgroundColor: "#000" },
 });
 
 export default memo(VideoRenderer);
