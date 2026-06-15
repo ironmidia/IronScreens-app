@@ -11,7 +11,9 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { useKeepAwake } from "expo-keep-awake";
+// ⚠️ NÃO importe expo-keep-awake diretamente — só suporta iOS/Android e quebra o bundle web.
+// Use sempre o hook local que tem variantes .native.ts e .web.ts.
+import { useKeepAwake } from "@/hooks/useKeepAwake";
 import { loadTerminal, clearTerminal } from "@/services/storageService";
 import { usePlayer } from "@/hooks/usePlayer";
 import { useFooterBar } from "@/hooks/useFooterBar";
