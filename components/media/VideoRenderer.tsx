@@ -82,8 +82,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
       return currentTime >= duration - END_TOLERANCE_SEC;
     };
 
-    // Arma (ou re-arma) o watchdog usando a duração REAL do vídeo.
-    // Só re-arma se a duração mudou significativamente.
     const armWatchdog = (realDurationSec?: number) => {
       if (endCalledRef.current) return;
 
@@ -134,7 +132,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
       }, IDLE_RECOVERY_DELAY_MS);
     };
 
-    // Watchdog inicial conservador (duração real ainda desconhecida)
     armWatchdog();
 
     let subEnd: { remove: () => void } | null = null;
@@ -143,7 +140,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
     let subPlaying: { remove: () => void } | null = null;
 
     try {
-      // playToEnd é o evento principal — avança quando o vídeo termina naturalmente
       subEnd = player.addListener("playToEnd", () => {
         console.log("[VideoRenderer] playToEnd");
         triggerEnd();
@@ -162,7 +158,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
           if (nextDuration > 0) {
             durationRef.current = nextDuration;
 
-            // Re-arma watchdog com a duração real assim que ela fica disponível
             if (Math.abs(nextDuration - prevDuration) > 0.2) {
               armWatchdog(nextDuration);
             }
@@ -225,7 +220,8 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
         contentFit="cover"
         nativeControls={false}
         fullscreenOptions={{ enable: false }}
-      />\n    </View>
+      />
+    </View>
   );
 }
 
