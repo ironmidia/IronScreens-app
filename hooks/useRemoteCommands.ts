@@ -23,7 +23,6 @@ export function useRemoteCommands({
   }, [onReload]);
 
   useEffect(() => {
-    // Aguarda terminalId ser resolvido — evita inscrição prematura com null
     if (!terminalId || terminalId.trim() === "") {
       console.log("[RemoteCmd] terminalId ainda não disponível, aguardando...");
       return;
@@ -31,12 +30,10 @@ export function useRemoteCommands({
 
     console.log("[RemoteCmd] Inscrevendo canal para terminal:", terminalId);
 
-    // Remove qualquer canal anterior com o mesmo nome antes de criar um novo
-    const channelName = `remote-cmd-${terminalId}`;
-    supabase.removeAllChannels();
-
+    // Canal dedicado apenas para comandos remotos via postgres_changes em terminals.
+    // Não usa removeAllChannels() para não derrubar o canal do usePlayer.
     const channel = supabase
-      .channel(channelName)
+      .channel(`remote-cmd-${terminalId}`)
       .on(
         "postgres_changes",
         {
@@ -49,6 +46,7 @@ export function useRemoteCommands({
           const newRow = payload.new as any;
           const cmd = newRow?.pending_command as string | null;
 
+          // Ignora updates sem comando pendente (ex: heartbeat, screenshot_url, etc.)
           if (!cmd) return;
 
           console.log("[RemoteCmd] Comando recebido:", cmd);
@@ -61,17 +59,16 @@ export function useRemoteCommands({
 
           switch (cmd) {
             case "RELOAD_PLAYLIST":
+              console.log("[RemoteCmd] Executando RELOAD_PLAYLIST...");
               onReloadRef.current();
               break;
 
             case "RESTART":
-              if (Platform.OS !== 'web') {
+              if (Platform.OS !== "web") {
                 try {
-                  const Updates = await import('expo-updates');
+                  const Updates = await import("expo-updates");
                   const update = await Updates.checkForUpdateAsync();
-                  if (update.isAvailable) {
-                    await Updates.fetchUpdateAsync();
-                  }
+                  if (update.isAvailable) await Updates.fetchUpdateAsync();
                   await Updates.reloadAsync();
                 } catch {
                   onReloadRef.current();
@@ -82,9 +79,9 @@ export function useRemoteCommands({
               break;
 
             case "UPDATE":
-              if (Platform.OS !== 'web') {
+              if (Platform.OS !== "web") {
                 try {
-                  const Updates = await import('expo-updates');
+                  const Updates = await import("expo-updates");
                   const update = await Updates.checkForUpdateAsync();
                   if (update.isAvailable) {
                     await Updates.fetchUpdateAsync();
@@ -107,17 +104,14 @@ export function useRemoteCommands({
                 );
                 break;
               }
-
               try {
                 console.log("[RemoteCmd] Executando captura de screenshot...");
                 const uri = await captureScreenRef.current();
-
                 if (uri) {
                   await saveScreenshotUrl(terminalId, uri);
                   console.log("[RemoteCmd] Screenshot salvo com sucesso:", uri);
                 } else {
                   console.error("[RemoteCmd] captureScreenRef retornou null — captura falhou");
-
                   await supabase
                     .from("terminals")
                     .update({

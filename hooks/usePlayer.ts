@@ -258,7 +258,6 @@ export function usePlayer(
           setSlot2Playlist(s2);
           slot1Ref.current = s1;
           slot2Ref.current = s2;
-          // Reset indices to 0 only if previous item no longer exists
           setSlot1Index((prev) => {
             const found = s1.findIndex(
               (i) =>
@@ -331,7 +330,7 @@ export function usePlayer(
           playlistSignatureRef.current = nextSignature;
           console.log("[Player] Mudança real na playlist detectada; aplicando estado");
         } else {
-          console.log("[Player] Playlist idêntica; ignorando reaplicação de estado");
+          console.log("[Player] Playlist idêntica; ignorando reaplicacão de estado");
         }
 
         applyPlaylistState(hydrated, false, changed);
@@ -380,13 +379,15 @@ export function usePlayer(
     return () => clearInterval(poll);
   }, [loadPlaylist]);
 
+  // Canal Realtime: escuta mudanças em playlist_items, media e media_group_items.
+  // Não escuta UPDATE em terminals aqui — isso é responsabilidade do useRemoteCommands,
+  // evitando dois canais concorrentes no mesmo filtro.
   useEffect(() => {
     const channel = supabase
       .channel(`terminal_${terminalId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "playlist_items" }, () => loadPlaylist())
       .on("postgres_changes", { event: "*", schema: "public", table: "media" }, () => loadPlaylist())
       .on("postgres_changes", { event: "*", schema: "public", table: "media_group_items" }, () => loadPlaylist())
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "terminals", filter: `id=eq.${terminalId}` }, () => loadPlaylist())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [terminalId, loadPlaylist]);
@@ -420,7 +421,6 @@ export function usePlayer(
     setHasNoScheduledMedia(!list.some((i) => isScheduled(i.media)));
   }, [terminalId]);
 
-  // Advance for hybrid slots (called independently by each slot timer)
   const advanceSlot1 = useCallback(() => {
     const list = slot1Ref.current;
     if (!list.length) return;
@@ -489,7 +489,6 @@ export function usePlayer(
     {
       advance,
       reload: loadPlaylist,
-      // expose slot advances via reload is not needed — player.tsx calls them directly
       advanceSlot1,
       advanceSlot2,
     } as any,
