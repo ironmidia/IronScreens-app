@@ -65,10 +65,16 @@ function orientationMatch(
   return mediaOrientation === terminalOrientation;
 }
 
+// FIX: no Android, isInternetReachable pode ser null (indeterminado), não false.
+// Tratar null como desconectado causava o banner "Sem conexão" mesmo com internet.
+// Só consideramos desconectado quando isConnected=false OU isInternetReachable=false explicitamente.
 async function isInternetAvailable(): Promise<boolean> {
   try {
     const state = await Network.getNetworkStateAsync();
-    return !!state.isConnected && !!state.isInternetReachable;
+    if (!state.isConnected) return false;
+    // null = Android ainda não determinou — considera conectado
+    if (state.isInternetReachable === false) return false;
+    return true;
   } catch {
     return false;
   }
@@ -420,9 +426,6 @@ export function usePlayer(
     const nextIndex = (currentIndexRef.current + 1) % list.length;
     currentIndexRef.current = nextIndex;
     setCurrentIndex(nextIndex);
-    // REMOVIDO: setHasNoScheduledMedia aqui causava falso positivo pois
-    // playlistRef.current pode estar desatualizado em relação à lista do servidor.
-    // O hasNoScheduledMedia é controlado exclusivamente pelo applyPlaylistState.
   }, [terminalId]);
 
   const advanceSlot1 = useCallback(() => {
@@ -443,9 +446,6 @@ export function usePlayer(
     setSlot2Revision((r) => r + 1);
   }, []);
 
-  // FIX: usa estado React (playlist) como fonte primária para garantir que
-  // currentItem seja populado imediatamente após setPlaylist no primeiro render.
-  // O ref é usado apenas como fallback para chamadas síncronas no advance().
   const currentItem = (() => {
     if (terminalOrientation === "hybrid") return null;
     const list = playlist.length ? playlist : playlistRef.current;
