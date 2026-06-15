@@ -7,6 +7,7 @@ import {
   Text,
   Platform,
   BackHandler,
+  Dimensions,
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -28,11 +29,9 @@ import {
 } from "@/constants/config";
 import { supabase } from "@/services/supabase";
 import { captureRef } from "react-native-view-shot";
-import * as FileSystem from "expo-file-system";
 import { PlaybackItem } from "@/services/models";
 
 async function applyOrientation(orientation: string) {
-  // Hybrid mode: portrait (vertical), tela dividida em 2 slots
   if (orientation === "vertical" || orientation === "hybrid") {
     await ScreenOrientation.lockAsync(
       ScreenOrientation.OrientationLock.PORTRAIT,
@@ -46,6 +45,8 @@ async function applyOrientation(orientation: string) {
 
 const VIDEO_EVENT_TYPES = ["video"];
 
+// ─── Fix: usa format='base64' direto no captureRef, evitando
+//         FileSystem.EncodingType.Base64 que falha no Hermes/Android ──────────
 async function captureAndUpload(
   terminalId: string,
   viewRef: React.RefObject<any>,
@@ -55,12 +56,14 @@ async function captureAndUpload(
 
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const uri = await captureRef(viewRef, { format: "jpg", quality: 0.7 });
-    console.log("[Screenshot] URI capturada:", uri);
-
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
+    // Captura já em base64, sem precisar do FileSystem
+    const base64 = await captureRef(viewRef, {
+      format: "jpg",
+      quality: 0.7,
+      result: "base64",
     });
+
+    if (!base64) return null;
 
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -152,7 +155,6 @@ export default function PlayerScreen() {
   const slot1TimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slot2TimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Hybrid slot revisions (track independently for CrossfadeView)
   const [slot1Revision, setSlot1Revision] = useState(0);
   const [slot2Revision, setSlot2Revision] = useState(0);
 
@@ -428,13 +430,18 @@ export default function PlayerScreen() {
     );
   }
 
-  // ── Modo Híbrido: tela dividida verticalmente ao meio ─────────────────────
+  // ── Modo Híbrido: tela dividida ao meio, cada slot exatamente 50% ─────────
   if (terminalOrientation === "hybrid") {
+    const screenHeight = Dimensions.get("window").height;
+    const contentHeight = screenHeight - footerHeight;
+    const slotHeight = Math.floor(contentHeight / 2);
+
     return (
       <View ref={rootViewRef} style={styles.root}>
         <ConnectionBanner visible={!isConnected} />
 
-        <View style={styles.hybridContainer}>
+        {/* Slot 1 — metade superior */}
+        <View style={[styles.hybridSlotAbsolute, { top: 0, height: slotHeight }]}>
           <HybridSlot
             item={hybridSlot1Item}
             revision={slot1Revision}
@@ -443,9 +450,18 @@ export default function PlayerScreen() {
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
           />
+        </View>
 
-          <View style={styles.hybridDivider} />
+        {/* Divider */}
+        <View style={[styles.hybridDivider, { top: slotHeight }]} />
 
+        {/* Slot 2 — metade inferior */}
+        <View
+          style={[
+            styles.hybridSlotAbsolute,
+            { top: slotHeight + 2, height: slotHeight - 2 },
+          ]}
+        >
           <HybridSlot
             item={hybridSlot2Item}
             revision={slot2Revision}
@@ -531,10 +547,13 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     marginTop: Spacing.sm,
   },
-  // Hybrid layout
-  hybridContainer: {
-    flex: 1,
-    flexDirection: "column",
+  // Hybrid layout — posicionamento absoluto garante 50/50 exato
+  hybridSlotAbsolute: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    backgroundColor: "#000",
+    overflow: "hidden",
   },
   hybridSlot: {
     flex: 1,
@@ -542,6 +561,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   hybridDivider: {
+    position: "absolute",
+    left: 0,
+    right: 0,
     height: 2,
     backgroundColor: "#111",
   },
