@@ -1,6 +1,4 @@
-// expo-file-system/legacy mantém a API antiga (getInfoAsync, downloadAsync, etc.)
-// sem os warnings de deprecação do Expo SDK 54+
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 
 const CACHE_DIR = `${FileSystem.documentDirectory}media-cache/`;
 const MANIFEST_PATH = `${CACHE_DIR}manifest.json`;
