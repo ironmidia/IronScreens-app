@@ -11,7 +11,9 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
-import { useKeepAwake } from "expo-keep-awake";
+// ⚠️ NÃO importe expo-keep-awake diretamente — só suporta iOS/Android e quebra o bundle web.
+// Use sempre o hook local que tem variantes .native.ts e .web.ts.
+import { useKeepAwake } from "@/hooks/useKeepAwake";
 import { loadTerminal, clearTerminal } from "@/services/storageService";
 import { usePlayer } from "@/hooks/usePlayer";
 import { useFooterBar } from "@/hooks/useFooterBar";
@@ -195,6 +197,12 @@ export default function PlayerScreen() {
     hybridSlot1Item,
     hybridSlot2Item,
   } = playerState;
+
+  // FIX: mantém o último item válido em cache para evitar tela preta
+  // durante a transição entre itens (quando currentItem é null por 1 frame).
+  const lastItemRef = useRef<PlaybackItem | null>(null);
+  if (currentItem) lastItemRef.current = currentItem;
+  const displayItem = currentItem ?? lastItemRef.current;
 
   const advanceRef = useRef(playerActions.advance);
   useEffect(() => { advanceRef.current = playerActions.advance; }, [playerActions.advance]);
@@ -489,16 +497,21 @@ export default function PlayerScreen() {
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
-        {hasNoScheduledMedia || !currentItem ? (
+        {/* FIX: usa displayItem (currentItem ?? lastItemRef) para evitar tela preta
+            durante a transição entre itens. O spinner só aparece no primeiro load,
+            antes de qualquer item ter sido exibido. */}
+        {hasNoScheduledMedia ? (
           <EmptyScreen />
+        ) : !displayItem ? (
+          <ActivityIndicator size="large" color={Colors.Primary} />
         ) : (
           <CrossfadeView
-            triggerKey={`${playbackRevision}:${currentItem.playlistItemId}:${currentItem.media.id}:${currentIndex}`}
+            triggerKey={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
           >
             <MediaRenderer
-              key={`${playbackRevision}:${currentItem.playlistItemId}:${currentItem.media.id}:${currentIndex}`}
-              media={currentItem.media}
-              durationSec={currentItem.durationSec}
+              key={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
+              media={displayItem.media}
+              durationSec={displayItem.durationSec}
               onVideoEnd={handleVideoEnd}
             />
           </CrossfadeView>
