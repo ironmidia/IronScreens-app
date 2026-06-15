@@ -41,10 +41,9 @@ export async function fetchPlaylistItems(terminalId: string): Promise<PlaylistIt
 
   if (!activeId) return [];
 
-  // ✅ hybrid_slot incluído no SELECT
   const { data, error } = await supabase
     .from('playlist_items')
-    .select('id, playlist_id, media_id, group_id, item_type, position, duration_sec, hybrid_slot')
+    .select('id, playlist_id, media_id, group_id, item_type, position, duration_sec')
     .eq('playlist_id', activeId)
     .order('position', { ascending: true });
 

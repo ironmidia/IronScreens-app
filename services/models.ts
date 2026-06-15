@@ -77,9 +77,6 @@ export interface PlaylistItem {
   item_type: 'media' | 'group';
   position: number;
   duration_sec: number;
-  /** Slot híbrido definido diretamente no item da playlist (1 ou 2). 
-   *  Tem prioridade sobre media.orientation quando presente. */
-  hybrid_slot: 1 | 2 | null;
 }
 
 export interface DisplayEvent {

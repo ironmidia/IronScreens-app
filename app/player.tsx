@@ -28,7 +28,7 @@ import {
   RECONNECT_INTERVAL_MS,
 } from "@/constants/config";
 import { supabase } from "@/services/supabase";
-import { captureScreen } from "react-native-view-shot";
+import { captureRef } from "react-native-view-shot";
 import { PlaybackItem } from "@/services/models";
 
 async function applyOrientation(orientation: string) {
@@ -45,17 +45,19 @@ async function applyOrientation(orientation: string) {
 
 const VIDEO_EVENT_TYPES = ["video"];
 
-// ─── captureScreen captura a tela inteira via API nativa do SO,
-//     incluindo camadas de hardware (Video, WebView/YouTube) ─────────────────
+// ─── Fix: usa format='base64' direto no captureRef, evitando
+//         FileSystem.EncodingType.Base64 que falha no Hermes/Android ──────────
 async function captureAndUpload(
   terminalId: string,
+  viewRef: React.RefObject<any>,
 ): Promise<string | null> {
   try {
-    // Pequeno delay para garantir que o frame atual esteja renderizado
+    if (!viewRef.current) return null;
+
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    // captureScreen usa a API de screenshot do sistema — captura video/WebView
-    const base64 = await captureScreen({
+    // Captura já em base64, sem precisar do FileSystem
+    const base64 = await captureRef(viewRef, {
       format: "jpg",
       quality: 0.7,
       result: "base64",
@@ -84,7 +86,7 @@ async function captureAndUpload(
       .getPublicUrl(fileName);
 
     const publicUrl = `${data.publicUrl}?t=${Date.now()}`;
-    console.log("[Screenshot] Upload conclu\u00eddo:", publicUrl);
+    console.log("[Screenshot] Upload concluído:", publicUrl);
     return publicUrl;
   } catch (e) {
     console.error("[Screenshot] Falhou:", e);
@@ -210,8 +212,7 @@ export default function PlayerScreen() {
 
   useEffect(() => {
     if (!terminalId) return;
-    // captureScreen n\u00e3o precisa de ref para a view \u2014 captura a tela inteira nativamente
-    captureScreenRef.current = () => captureAndUpload(terminalId);
+    captureScreenRef.current = () => captureAndUpload(terminalId, rootViewRef);
     console.log("[Player] captureScreenRef registrado para terminal:", terminalId);
   }, [terminalId]);
 
@@ -271,7 +272,7 @@ export default function PlayerScreen() {
     return () => sub.remove();
   }, [menuVisible]);
 
-  // ── Timer para modo normal (n\u00e3o h\u00edbrido) ──────────────────────────────────
+  // ── Timer para modo normal (não híbrido) ──────────────────────────────────
   useEffect(() => {
     if (terminalOrientation === "hybrid") return;
     if (!currentItem) return;
@@ -287,7 +288,7 @@ export default function PlayerScreen() {
     const durationMs = durationSec * 1000 + CROSSFADE_BUFFER_MS;
 
     console.log(
-      `[Player] Timer: ${currentItem.media.name} (${currentItem.media.type}) \u2014 ${durationSec}s`,
+      `[Player] Timer: ${currentItem.media.name} (${currentItem.media.type}) — ${durationSec}s`,
     );
 
     advanceTimerRef.current = setTimeout(() => {
@@ -308,7 +309,7 @@ export default function PlayerScreen() {
     playbackRevision,
   ]);
 
-  // ── Timer Slot 1 (h\u00edbrido) ────────────────────────────────────────────────
+  // ── Timer Slot 1 (híbrido) ────────────────────────────────────────────────
   useEffect(() => {
     if (terminalOrientation !== "hybrid") return;
     if (!hybridSlot1Item) return;
@@ -338,7 +339,7 @@ export default function PlayerScreen() {
     hybridSlot1Item?.durationSec,
   ]);
 
-  // ── Timer Slot 2 (h\u00edbrido) ────────────────────────────────────────────────
+  // ── Timer Slot 2 (híbrido) ────────────────────────────────────────────────
   useEffect(() => {
     if (terminalOrientation !== "hybrid") return;
     if (!hybridSlot2Item) return;
@@ -429,7 +430,7 @@ export default function PlayerScreen() {
     );
   }
 
-  // ── Modo H\u00edbrido: tela dividida ao meio, cada slot exatamente 50% ─────────
+  // ── Modo Híbrido: tela dividida ao meio, cada slot exatamente 50% ─────────
   if (terminalOrientation === "hybrid") {
     const screenHeight = Dimensions.get("window").height;
     const contentHeight = screenHeight - footerHeight;
@@ -439,7 +440,7 @@ export default function PlayerScreen() {
       <View ref={rootViewRef} style={styles.root}>
         <ConnectionBanner visible={!isConnected} />
 
-        {/* Slot 1 \u2014 metade superior */}
+        {/* Slot 1 — metade superior */}
         <View style={[styles.hybridSlotAbsolute, { top: 0, height: slotHeight }]}>
           <HybridSlot
             item={hybridSlot1Item}
@@ -454,7 +455,7 @@ export default function PlayerScreen() {
         {/* Divider */}
         <View style={[styles.hybridDivider, { top: slotHeight }]} />
 
-        {/* Slot 2 \u2014 metade inferior */}
+        {/* Slot 2 — metade inferior */}
         <View
           style={[
             styles.hybridSlotAbsolute,
@@ -546,7 +547,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     marginTop: Spacing.sm,
   },
-  // Hybrid layout \u2014 posicionamento absoluto garante 50/50 exato
+  // Hybrid layout — posicionamento absoluto garante 50/50 exato
   hybridSlotAbsolute: {
     position: "absolute",
     left: 0,
