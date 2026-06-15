@@ -23,12 +23,20 @@ export function useRemoteCommands({
   }, [onReload]);
 
   useEffect(() => {
-    if (!terminalId) return;
+    // Aguarda terminalId ser resolvido — evita inscrição prematura com null
+    if (!terminalId || terminalId.trim() === "") {
+      console.log("[RemoteCmd] terminalId ainda não disponível, aguardando...");
+      return;
+    }
 
     console.log("[RemoteCmd] Inscrevendo canal para terminal:", terminalId);
 
+    // Remove qualquer canal anterior com o mesmo nome antes de criar um novo
+    const channelName = `remote-cmd-${terminalId}`;
+    supabase.removeAllChannels();
+
     const channel = supabase
-      .channel(`remote-cmd-${terminalId}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
