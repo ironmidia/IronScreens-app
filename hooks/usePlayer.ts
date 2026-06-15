@@ -36,6 +36,9 @@ export interface PlayerState {
   hasNoScheduledMedia: boolean;
   isConnected: boolean;
   isOfflineCache: boolean;
+  // Hybrid mode: independent items per slot
+  hybridSlot1Item: PlaybackItem | null;
+  hybridSlot2Item: PlaybackItem | null;
 }
 
 export interface PlayerActions {
@@ -43,11 +46,22 @@ export interface PlayerActions {
   reload: () => Promise<void>;
 }
 
+/**
+ * Returns whether a media item is compatible with the terminal orientation.
+ * - hybrid terminal: accepts hybrid_slot_1 and hybrid_slot_2 (handled separately)
+ * - horizontal/vertical terminal: exact match or null
+ */
 function orientationMatch(
   mediaOrientation: string | null | undefined,
   terminalOrientation: string,
 ): boolean {
   if (!mediaOrientation) return true;
+  if (terminalOrientation === "hybrid") {
+    return (
+      mediaOrientation === "hybrid_slot_1" ||
+      mediaOrientation === "hybrid_slot_2"
+    );
+  }
   return mediaOrientation === terminalOrientation;
 }
 
@@ -69,6 +83,7 @@ function buildPlaylistSignature(items: PlaybackItem[]): string {
       item.durationSec ?? null,
       item.groupId ?? null,
       item.media.local_file_url ?? null,
+      item.hybridSlot ?? null,
     ]),
   );
 }
@@ -86,19 +101,31 @@ export function usePlayer(
   const [isConnected, setIsConnected] = useState(true);
   const [isOfflineCache, setIsOfflineCache] = useState(false);
 
+  // Hybrid slot playlists (independent)
+  const [slot1Playlist, setSlot1Playlist] = useState<PlaybackItem[]>([]);
+  const [slot2Playlist, setSlot2Playlist] = useState<PlaybackItem[]>([]);
+  const [slot1Index, setSlot1Index] = useState(0);
+  const [slot2Index, setSlot2Index] = useState(0);
+  const [slot1Revision, setSlot1Revision] = useState(0);
+  const [slot2Revision, setSlot2Revision] = useState(0);
+
   const groupIndicesRef = useRef<Record<string, number>>({});
   const playlistRef = useRef<PlaybackItem[]>([]);
   const currentIndexRef = useRef(0);
   const playlistSignatureRef = useRef("");
   const loadInFlightRef = useRef(false);
 
-  useEffect(() => {
-    playlistRef.current = playlist;
-  }, [playlist]);
+  const slot1Ref = useRef<PlaybackItem[]>([]);
+  const slot2Ref = useRef<PlaybackItem[]>([]);
+  const slot1IndexRef = useRef(0);
+  const slot2IndexRef = useRef(0);
 
-  useEffect(() => {
-    currentIndexRef.current = currentIndex;
-  }, [currentIndex]);
+  useEffect(() => { playlistRef.current = playlist; }, [playlist]);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { slot1Ref.current = slot1Playlist; }, [slot1Playlist]);
+  useEffect(() => { slot2Ref.current = slot2Playlist; }, [slot2Playlist]);
+  useEffect(() => { slot1IndexRef.current = slot1Index; }, [slot1Index]);
+  useEffect(() => { slot2IndexRef.current = slot2Index; }, [slot2Index]);
 
   const buildPlaylist = useCallback(async (): Promise<PlaybackItem[]> => {
     const rawItems = await fetchPlaylistItems(terminalId);
@@ -125,11 +152,19 @@ export function usePlayer(
         if (!orientationMatch(media.orientation, terminalOrientation)) continue;
         if (!isScheduled(media)) continue;
 
+        const hybridSlot: 1 | 2 | undefined =
+          media.orientation === "hybrid_slot_1"
+            ? 1
+            : media.orientation === "hybrid_slot_2"
+            ? 2
+            : undefined;
+
         expanded.push({
           playlistItemId: item.id,
           media,
           durationSec: item.duration_sec,
           groupId: null,
+          hybridSlot,
         });
         continue;
       }
@@ -163,11 +198,20 @@ export function usePlayer(
 
         if (!selectedItem?.media) continue;
 
+        const m = selectedItem.media as Media;
+        const hybridSlot: 1 | 2 | undefined =
+          m.orientation === "hybrid_slot_1"
+            ? 1
+            : m.orientation === "hybrid_slot_2"
+            ? 2
+            : undefined;
+
         expanded.push({
           playlistItemId: item.id,
-          media: selectedItem.media as Media,
+          media: m,
           durationSec: item.duration_sec,
           groupId: item.group_id,
+          hybridSlot,
         });
       }
     }
@@ -195,13 +239,9 @@ export function usePlayer(
       return items.map((item) => {
         const key = `${item.playlistItemId}:${item.media.id}`;
         const localUri = localMap[key] || null;
-
         return {
           ...item,
-          media: {
-            ...item.media,
-            local_file_url: localUri,
-          },
+          media: { ...item.media, local_file_url: localUri },
         };
       });
     },
@@ -209,41 +249,60 @@ export function usePlayer(
   );
 
   const applyPlaylistState = useCallback(
-    (
-      items: PlaybackItem[],
-      offline: boolean,
-      changed: boolean,
-    ) => {
+    (items: PlaybackItem[], offline: boolean, changed: boolean) => {
       if (changed) {
-        setPlaylist(items);
-        playlistRef.current = items;
-
-        setCurrentIndex((prev) => {
-          const prevItem = playlistRef.current[prev];
-          if (!prevItem) {
-            currentIndexRef.current = 0;
-            return 0;
-          }
-
-          const foundIndex = items.findIndex(
-            (item) =>
-              item.playlistItemId === prevItem.playlistItemId &&
-              item.media.id === prevItem.media.id,
-          );
-
-          const next = foundIndex >= 0 ? foundIndex : 0;
-          currentIndexRef.current = next;
-          return next;
-        });
-
-        setPlaybackRevision((rev) => rev + 1);
+        if (terminalOrientation === "hybrid") {
+          const s1 = items.filter((i) => i.hybridSlot === 1);
+          const s2 = items.filter((i) => i.hybridSlot === 2);
+          setSlot1Playlist(s1);
+          setSlot2Playlist(s2);
+          slot1Ref.current = s1;
+          slot2Ref.current = s2;
+          // Reset indices to 0 only if previous item no longer exists
+          setSlot1Index((prev) => {
+            const found = s1.findIndex(
+              (i) =>
+                i.playlistItemId === slot1Ref.current[prev]?.playlistItemId,
+            );
+            const next = found >= 0 ? found : 0;
+            slot1IndexRef.current = next;
+            return next;
+          });
+          setSlot2Index((prev) => {
+            const found = s2.findIndex(
+              (i) =>
+                i.playlistItemId === slot2Ref.current[prev]?.playlistItemId,
+            );
+            const next = found >= 0 ? found : 0;
+            slot2IndexRef.current = next;
+            return next;
+          });
+          setSlot1Revision((r) => r + 1);
+          setSlot2Revision((r) => r + 1);
+        } else {
+          setPlaylist(items);
+          playlistRef.current = items;
+          setCurrentIndex((prev) => {
+            const prevItem = playlistRef.current[prev];
+            if (!prevItem) { currentIndexRef.current = 0; return 0; }
+            const foundIndex = items.findIndex(
+              (item) =>
+                item.playlistItemId === prevItem.playlistItemId &&
+                item.media.id === prevItem.media.id,
+            );
+            const next = foundIndex >= 0 ? foundIndex : 0;
+            currentIndexRef.current = next;
+            return next;
+          });
+          setPlaybackRevision((rev) => rev + 1);
+        }
       }
 
       setHasNoScheduledMedia(!items.some((i) => isScheduled(i.media)));
       setIsOfflineCache(offline);
       setError(null);
     },
-    [],
+    [terminalOrientation],
   );
 
   const loadPlaylist = useCallback(
@@ -258,10 +317,7 @@ export function usePlayer(
 
       try {
         const online = await isInternetAvailable();
-
-        if (!online) {
-          throw new Error("Sem internet para sincronizar.");
-        }
+        if (!online) throw new Error("Sem internet para sincronizar.");
 
         const built = await buildPlaylist();
         const hydrated = await hydrateWithLocalCache(built);
@@ -288,14 +344,9 @@ export function usePlayer(
 
         if (cached.length > 0) {
           console.log("[Player] Usando cache offline:", cached.length, "itens");
-
           const nextSignature = buildPlaylistSignature(cached);
           const changed = nextSignature !== playlistSignatureRef.current;
-
-          if (changed) {
-            playlistSignatureRef.current = nextSignature;
-          }
-
+          if (changed) playlistSignatureRef.current = nextSignature;
           applyPlaylistState(cached, true, changed);
         } else {
           setError(err?.message || "Sem conexão e sem cache disponível.");
@@ -309,74 +360,39 @@ export function usePlayer(
     [terminalId, buildPlaylist, hydrateWithLocalCache, applyPlaylistState],
   );
 
-  useEffect(() => {
-    loadPlaylist(true);
-  }, [loadPlaylist]);
+  useEffect(() => { loadPlaylist(true); }, [loadPlaylist]);
 
   useEffect(() => {
     const heartbeat = setInterval(async () => {
       try {
         await setTerminalOnline(terminalId);
         setIsConnected(true);
-
-        if (isOfflineCache) {
-          loadPlaylist();
-        }
+        if (isOfflineCache) loadPlaylist();
       } catch {
         setIsConnected(false);
       }
     }, HEARTBEAT_INTERVAL_MS);
-
     return () => clearInterval(heartbeat);
   }, [terminalId, isOfflineCache, loadPlaylist]);
 
   useEffect(() => {
-    const poll = setInterval(() => {
-      loadPlaylist();
-    }, PLAYLIST_POLL_INTERVAL_MS);
-
+    const poll = setInterval(() => { loadPlaylist(); }, PLAYLIST_POLL_INTERVAL_MS);
     return () => clearInterval(poll);
   }, [loadPlaylist]);
 
   useEffect(() => {
     const channel = supabase
       .channel(`terminal_${terminalId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "playlist_items" },
-        () => loadPlaylist(),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "media" },
-        () => loadPlaylist(),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "media_group_items" },
-        () => loadPlaylist(),
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "terminals",
-          filter: `id=eq.${terminalId}`,
-        },
-        () => loadPlaylist(),
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "playlist_items" }, () => loadPlaylist())
+      .on("postgres_changes", { event: "*", schema: "public", table: "media" }, () => loadPlaylist())
+      .on("postgres_changes", { event: "*", schema: "public", table: "media_group_items" }, () => loadPlaylist())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "terminals", filter: `id=eq.${terminalId}` }, () => loadPlaylist())
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [terminalId, loadPlaylist]);
 
   useEffect(() => {
-    return () => {
-      setTerminalOffline(terminalId).catch(() => {});
-    };
+    return () => { setTerminalOffline(terminalId).catch(() => {}); };
   }, [terminalId]);
 
   const advance = useCallback(async () => {
@@ -384,7 +400,6 @@ export function usePlayer(
     if (!list.length) return;
 
     const current = list[currentIndexRef.current];
-
     if (current) {
       logDisplayEvent({
         media_id: current.media.id,
@@ -392,7 +407,6 @@ export function usePlayer(
         displayed_at: new Date().toISOString(),
         duration_sec: current.durationSec,
       });
-
       if (current.groupId) {
         const prevIdx = groupIndicesRef.current[current.groupId] ?? 0;
         groupIndicesRef.current[current.groupId] = prevIdx + 1;
@@ -406,15 +420,55 @@ export function usePlayer(
     setHasNoScheduledMedia(!list.some((i) => isScheduled(i.media)));
   }, [terminalId]);
 
+  // Advance for hybrid slots (called independently by each slot timer)
+  const advanceSlot1 = useCallback(() => {
+    const list = slot1Ref.current;
+    if (!list.length) return;
+    const next = (slot1IndexRef.current + 1) % list.length;
+    slot1IndexRef.current = next;
+    setSlot1Index(next);
+    setSlot1Revision((r) => r + 1);
+  }, []);
+
+  const advanceSlot2 = useCallback(() => {
+    const list = slot2Ref.current;
+    if (!list.length) return;
+    const next = (slot2IndexRef.current + 1) % list.length;
+    slot2IndexRef.current = next;
+    setSlot2Index(next);
+    setSlot2Revision((r) => r + 1);
+  }, []);
+
   const currentItem = (() => {
+    if (terminalOrientation === "hybrid") return null;
     const list = playlistRef.current.length ? playlistRef.current : playlist;
     if (!list.length) return null;
-
     for (let i = 0; i < list.length; i++) {
       const idx = (currentIndexRef.current + i) % list.length;
       if (isScheduled(list[idx].media)) return list[idx];
     }
+    return null;
+  })();
 
+  const hybridSlot1Item = (() => {
+    if (terminalOrientation !== "hybrid") return null;
+    const list = slot1Ref.current.length ? slot1Ref.current : slot1Playlist;
+    if (!list.length) return null;
+    for (let i = 0; i < list.length; i++) {
+      const idx = (slot1IndexRef.current + i) % list.length;
+      if (isScheduled(list[idx].media)) return list[idx];
+    }
+    return null;
+  })();
+
+  const hybridSlot2Item = (() => {
+    if (terminalOrientation !== "hybrid") return null;
+    const list = slot2Ref.current.length ? slot2Ref.current : slot2Playlist;
+    if (!list.length) return null;
+    for (let i = 0; i < list.length; i++) {
+      const idx = (slot2IndexRef.current + i) % list.length;
+      if (isScheduled(list[idx].media)) return list[idx];
+    }
     return null;
   })();
 
@@ -429,10 +483,15 @@ export function usePlayer(
       hasNoScheduledMedia,
       isConnected,
       isOfflineCache,
+      hybridSlot1Item,
+      hybridSlot2Item,
     },
     {
       advance,
       reload: loadPlaylist,
-    },
+      // expose slot advances via reload is not needed — player.tsx calls them directly
+      advanceSlot1,
+      advanceSlot2,
+    } as any,
   ];
 }

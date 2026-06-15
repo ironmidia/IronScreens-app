@@ -4,7 +4,7 @@ export interface Terminal {
   id: string;
   name: string;
   type: 'tv_horizontal' | 'tv_vertical' | 'led_panel';
-  orientation: 'horizontal' | 'vertical';
+  orientation: 'horizontal' | 'vertical' | 'hybrid';
   status: 'online' | 'offline';
   device_id: string | null;
   client: string | null;
@@ -24,7 +24,7 @@ export interface Media {
   id: string;
   name: string;
   type: 'video' | 'image' | 'youtube' | 'external_link' | 'instagram' | 'programmatic';
-  orientation: 'horizontal' | 'vertical';
+  orientation: 'horizontal' | 'vertical' | 'hybrid_slot_1' | 'hybrid_slot_2';
   company: string | null;
   category: string | null;
   file_url: string | null;
@@ -86,4 +86,5 @@ export interface PlaybackItem {
   media: Media;
   durationSec: number;
   groupId: string | null;
+  hybridSlot?: 1 | 2;
 }
