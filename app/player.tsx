@@ -198,6 +198,12 @@ export default function PlayerScreen() {
     hybridSlot2Item,
   } = playerState;
 
+  // FIX: mantém o último item válido em cache para evitar tela preta
+  // durante a transição entre itens (quando currentItem é null por 1 frame).
+  const lastItemRef = useRef<PlaybackItem | null>(null);
+  if (currentItem) lastItemRef.current = currentItem;
+  const displayItem = currentItem ?? lastItemRef.current;
+
   const advanceRef = useRef(playerActions.advance);
   useEffect(() => { advanceRef.current = playerActions.advance; }, [playerActions.advance]);
 
@@ -491,20 +497,21 @@ export default function PlayerScreen() {
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
-        {/* FIX: separa hasNoScheduledMedia de !currentItem para evitar EmptyScreen
-            durante o carregamento inicial quando currentItem ainda é null */}
+        {/* FIX: usa displayItem (currentItem ?? lastItemRef) para evitar tela preta
+            durante a transição entre itens. O spinner só aparece no primeiro load,
+            antes de qualquer item ter sido exibido. */}
         {hasNoScheduledMedia ? (
           <EmptyScreen />
-        ) : !currentItem ? (
+        ) : !displayItem ? (
           <ActivityIndicator size="large" color={Colors.Primary} />
         ) : (
           <CrossfadeView
-            triggerKey={`${playbackRevision}:${currentItem.playlistItemId}:${currentItem.media.id}:${currentIndex}`}
+            triggerKey={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
           >
             <MediaRenderer
-              key={`${playbackRevision}:${currentItem.playlistItemId}:${currentItem.media.id}:${currentIndex}`}
-              media={currentItem.media}
-              durationSec={currentItem.durationSec}
+              key={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
+              media={displayItem.media}
+              durationSec={displayItem.durationSec}
               onVideoEnd={handleVideoEnd}
             />
           </CrossfadeView>
