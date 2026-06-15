@@ -1,4 +1,6 @@
-import * as FileSystem from "expo-file-system/legacy";
+// ⚠️ DO NOT change to "expo-file-system/legacy" — the /legacy subpath does not exist
+// in the installed SDK version and will break the Metro bundler. Use the root import only.
+import * as FileSystem from "expo-file-system";
 
 const CACHE_DIR = `${FileSystem.documentDirectory}media-cache/`;
 const MANIFEST_PATH = `${CACHE_DIR}manifest.json`;
