@@ -1,25 +1,39 @@
 // Iron Screens — YouTube Service
 
+/**
+ * Extrai o videoId de qualquer formato de URL do YouTube:
+ *   - youtube.com/watch?v=ID
+ *   - youtube.com/shorts/ID
+ *   - youtu.be/ID
+ *   - youtube.com/embed/ID
+ */
 export function extractYouTubeId(url: string): string | null {
   try {
     const parsed = new URL(url);
-    if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1).split('?')[0] || null;
+    // youtu.be/ID
+    if (parsed.hostname === 'youtu.be') {
+      return parsed.pathname.slice(1).split('?')[0] || null;
+    }
+    // watch?v=ID
     const v = parsed.searchParams.get('v');
     if (v) return v;
-    const match = parsed.pathname.match(/\/embed\/([^/?]+)/);
+    // /shorts/ID  ou  /embed/ID
+    const match = parsed.pathname.match(/\/(?:shorts|embed)\/([a-zA-Z0-9_-]{11})/);
     if (match) return match[1];
   } catch {
-    const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/);
+    // fallback regex para URLs malformadas
+    const m = url.match(
+      /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/
+    );
     if (m) return m[1];
   }
   return null;
 }
 
 /**
- * Iframe embed direto via youtube.com/embed (sem IFrame API).
- * Não usa youtube_api nem buildYouTubeHtml com JS — apenas src no iframe.
- * O baseUrl no WebView deve ser 'https://www.youtube.com' para que o embed
- * reconheça a origem e não retorne erro 152/153.
+ * Gera a URL de embed do YouTube.
+ * Funciona tanto para vídeos normais quanto para Shorts —
+ * o endpoint /embed/ID é o mesmo para ambos os formatos.
  */
 export function getYouTubeEmbedUrl(videoId: string): string {
   return (

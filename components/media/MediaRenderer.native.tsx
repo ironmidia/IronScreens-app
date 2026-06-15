@@ -6,6 +6,7 @@ import { extractYouTubeId } from "@/services/youtubeService";
 import ImageRenderer from "./ImageRenderer";
 import VideoRenderer from "./VideoRenderer";
 import YoutubeRenderer from "./YoutubeRenderer.native";
+import InstagramRenderer from "./InstagramRenderer.native";
 import WebViewRenderer from "./WebViewRenderer.native";
 
 interface MediaRendererProps {
@@ -39,8 +40,12 @@ function MediaRenderer({ media, durationSec, onVideoEnd }: MediaRendererProps) {
       return <YoutubeRenderer videoId={videoId} />;
     }
 
-    case "external_link":
+    // Instagram usa renderer dedicado com HTML wrapper para autoplay sem UI social
     case "instagram":
+      if (!media.external_url) return <View style={styles.black} />;
+      return <InstagramRenderer uri={media.external_url} />;
+
+    case "external_link":
       if (!media.external_url) return <View style={styles.black} />;
       return <WebViewRenderer uri={media.external_url} />;
 
