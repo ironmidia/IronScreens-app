@@ -1,23 +1,50 @@
 // Iron Screens — Playlist Service
 import { supabase } from './supabase';
-import { PlaylistItem, Media, MediaGroup, MediaGroupItem } from './models';
+import { PlaylistItem, Media, MediaGroup, MediaGroupItem, Playlist } from './models';
+import { isPlaylistScheduledNow } from './scheduleService';
+
+const PLAYLIST_SCHEDULE_FIELDS =
+  'id, priority, schedule_start, schedule_end, schedule_time_start, schedule_time_end, schedule_days';
+
+/**
+ * Retorna o ID da playlist de maior prioridade ativa para o terminal.
+ * Playlists sem agendamento são sempre ativas (priority=0 = padrão).
+ * Se nenhuma playlist estiver ativa, retorna null.
+ */
+export async function fetchActivePlaylistId(terminalId: string): Promise<string | null> {
+  const { data: playlists, error } = await supabase
+    .from('playlists')
+    .select(PLAYLIST_SCHEDULE_FIELDS)
+    .eq('terminal_id', terminalId)
+    .order('priority', { ascending: false });
+
+  if (error) {
+    console.warn('[PlaylistService] Erro ao buscar playlists:', error.message);
+    return null;
+  }
+
+  if (!playlists || playlists.length === 0) return null;
+
+  for (const pl of playlists as Playlist[]) {
+    if (isPlaylistScheduledNow(pl)) {
+      console.log(`[PlaylistService] Playlist ativa: "${pl.id}" (priority=${pl.priority})`);
+      return pl.id;
+    }
+  }
+
+  console.log('[PlaylistService] Nenhuma playlist ativa no momento.');
+  return null;
+}
 
 export async function fetchPlaylistItems(terminalId: string): Promise<PlaylistItem[]> {
-  // First get playlist IDs for this terminal
-  const { data: playlists, error: plErr } = await supabase
-    .from('playlists')
-    .select('id')
-    .eq('terminal_id', terminalId);
+  const activeId = await fetchActivePlaylistId(terminalId);
 
-  if (plErr) throw plErr;
-  if (!playlists || playlists.length === 0) return [];
-
-  const playlistIds = playlists.map((p: any) => p.id);
+  if (!activeId) return [];
 
   const { data, error } = await supabase
     .from('playlist_items')
     .select('id, playlist_id, media_id, group_id, item_type, position, duration_sec')
-    .in('playlist_id', playlistIds)
+    .eq('playlist_id', activeId)
     .order('position', { ascending: true });
 
   if (error) throw error;

@@ -60,6 +60,12 @@ export interface Playlist {
   id: string;
   terminal_id: string;
   name: string;
+  priority: number;
+  schedule_start: string | null;
+  schedule_end: string | null;
+  schedule_time_start: string | null;
+  schedule_time_end: string | null;
+  schedule_days: string[];
   created_at: string;
 }
 
