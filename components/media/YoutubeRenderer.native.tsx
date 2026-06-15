@@ -1,17 +1,28 @@
 // Iron Screens — YouTube Renderer (Native)
-// Suporta tanto vídeos normais (watch?v=) quanto Shorts (/shorts/)
-// O endpoint /embed/ID é o mesmo para ambos os formatos.
 //
-// Estratégia para evitar erro 152 (embed bloqueado por origin):
-//   source={{ html }} + baseUrl: 'https://www.youtube.com'
-//   faz o WebView reportar origin = https://www.youtube.com para o iframe,
-//   que é um domínio aceito pelo player de embed do YouTube.
+// Solução para Erro 152/153 (confirmada na issue #3889 do react-native-webview):
+//
+//   1. source={{ uri }} diretamente — evita que o WebView use origin=file://
+//      que o YouTube rejeita desde a atualização da API de julho/2025.
+//
+//   2. headers: { Referer } — o YouTube exige um Referer HTTP válido (https://).
+//      Sem ele, a verificação de identidade do embedder falha com código 152/153.
+//
+//   3. &origin= na URL — informa ao player JS do YouTube qual é o origin
+//      autorizado para postMessage (mesma regra da YouTube IFrame API).
+//
+// Referências:
+//   https://github.com/react-native-webview/react-native-webview/issues/3889
+//   https://corsproxy.io/blog/fix-youtube-error-150-153-webview/
 import React, { memo } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { getYouTubeEmbedUrl } from "@/services/youtubeService";
 
-// UA de Smart TV / Chromecast — o YouTube não bloqueia autoplay nesses dispositivos
+// Bundle ID do app — deve ser um domínio https:// válido para o YouTube aceitar
+const REFERRER = "https://ironscreens.app";
+
+// UA de Smart TV — o YouTube não bloqueia autoplay nesses dispositivos
 const TV_UA =
   "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) " +
   "AppleWebKit/538.1 (KHTML, like Gecko) " +
@@ -21,54 +32,26 @@ interface YoutubeRendererProps {
   videoId: string;
 }
 
-function buildHtml(embedUrl: string): string {
-  // origin=https://www.youtube.com no src do iframe é o parâmetro que
-  // instrui o player a aceitar postMessage e autoplay desse contexto
-  const urlWithOrigin = embedUrl + "&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com";
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
-    iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
-  </style>
-</head>
-<body>
-  <iframe
-    id="yt"
-    src="${urlWithOrigin}"
-    allow="autoplay; encrypted-media; picture-in-picture"
-    allowfullscreen="false"
-    frameborder="0"
-  ></iframe>
-  <script>
-    // Envia PLAY via postMessage logo que o iframe carregar (protocolo YouTube IFrame API)
-    var iframe = document.getElementById('yt');
-    iframe.addEventListener('load', function() {
-      setTimeout(function() {
-        try {
-          iframe.contentWindow.postMessage(
-            JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
-            'https://www.youtube.com'
-          );
-        } catch(e) {}
-      }, 500);
-    });
-  </script>
-</body>
-</html>`;
-}
-
 function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
-  const embedUrl = getYouTubeEmbedUrl(videoId);
-  const html = buildHtml(embedUrl);
+  // getYouTubeEmbedUrl já inclui autoplay=1, loop=1, playsinline=1, etc.
+  // Adicionamos &origin= para que o player JS aceite postMessage do nosso WebView
+  const baseUrl = getYouTubeEmbedUrl(videoId);
+  const embedUri = `${baseUrl}&origin=${encodeURIComponent(REFERRER)}`;
 
   return (
     <View style={styles.container}>
       <WebView
-        source={{ html, baseUrl: "https://www.youtube.com" }}
+        // source={{ uri }} → o WebView envia a URL diretamente ao YouTube
+        // sem passar por um HTML intermediário, o que mantém o Referer correto
+        source={{
+          uri: embedUri,
+          headers: {
+            // Referer válido é obrigatório desde a API update de julho/2025
+            Referer: REFERRER,
+            // Origin reforça a identidade junto com o Referer
+            Origin: REFERRER,
+          },
+        }}
         userAgent={TV_UA}
         style={styles.webview}
         mediaPlaybackRequiresUserAction={false}
