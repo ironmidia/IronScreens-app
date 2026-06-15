@@ -297,6 +297,8 @@ export function usePlayer(
         }
       }
 
+      // hasNoScheduledMedia é sempre recalculado com a lista fresca do servidor.
+      // NÃO recalcular no advance() para evitar falso positivo com playlistRef desatualizado.
       setHasNoScheduledMedia(!items.some((i) => isScheduled(i.media)));
       setIsOfflineCache(offline);
       setError(null);
@@ -418,7 +420,9 @@ export function usePlayer(
     const nextIndex = (currentIndexRef.current + 1) % list.length;
     currentIndexRef.current = nextIndex;
     setCurrentIndex(nextIndex);
-    setHasNoScheduledMedia(!list.some((i) => isScheduled(i.media)));
+    // REMOVIDO: setHasNoScheduledMedia aqui causava falso positivo pois
+    // playlistRef.current pode estar desatualizado em relação à lista do servidor.
+    // O hasNoScheduledMedia é controlado exclusivamente pelo applyPlaylistState.
   }, [terminalId]);
 
   const advanceSlot1 = useCallback(() => {
