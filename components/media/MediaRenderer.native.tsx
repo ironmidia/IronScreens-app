@@ -37,13 +37,14 @@ function MediaRenderer({ media, durationSec, onVideoEnd }: MediaRendererProps) {
       if (!media.external_url) return <View style={styles.black} />;
       const videoId = extractYouTubeId(media.external_url);
       if (!videoId) return <View style={styles.black} />;
-      return <YoutubeRenderer videoId={videoId} />;
+      // onVideoEnd é passado para que o YouTube dispare o avanço ao terminar
+      return <YoutubeRenderer videoId={videoId} onEnd={onVideoEnd} />;
     }
 
-    // Instagram usa renderer dedicado com HTML wrapper para autoplay sem UI social
     case "instagram":
       if (!media.external_url) return <View style={styles.black} />;
-      return <InstagramRenderer uri={media.external_url} />;
+      // onVideoEnd é passado para que o Instagram dispare o avanço ao terminar
+      return <InstagramRenderer uri={media.external_url} onEnd={onVideoEnd} />;
 
     case "external_link":
       if (!media.external_url) return <View style={styles.black} />;

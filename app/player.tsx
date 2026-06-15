@@ -43,10 +43,11 @@ async function applyOrientation(orientation: string) {
   }
 }
 
-const VIDEO_EVENT_TYPES = ["video"];
+// Tipos de mídia que controlam o próprio avanço via onVideoEnd
+// (não usam timer baseado em durationSec)
+// Inclui youtube e instagram pois eles disparam onVideoEnd quando o vídeo termina
+const VIDEO_EVENT_TYPES = ["video", "youtube", "instagram"];
 
-// ─── Fix: usa format='base64' direto no captureRef, evitando
-//         FileSystem.EncodingType.Base64 que falha no Hermes/Android ──────────
 async function captureAndUpload(
   terminalId: string,
   viewRef: React.RefObject<any>,
@@ -56,7 +57,6 @@ async function captureAndUpload(
 
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    // Captura já em base64, sem precisar do FileSystem
     const base64 = await captureRef(viewRef, {
       format: "jpg",
       quality: 0.7,
@@ -93,8 +93,6 @@ async function captureAndUpload(
     return null;
   }
 }
-
-// ─── Hybrid Slot ──────────────────────────────────────────────────────────────
 
 interface HybridSlotProps {
   item: PlaybackItem | null;
@@ -136,8 +134,6 @@ function HybridSlot({
     </Pressable>
   );
 }
-
-// ─── Player Screen ─────────────────────────────────────────────────────────────
 
 export default function PlayerScreen() {
   useKeepAwake();
@@ -273,6 +269,8 @@ export default function PlayerScreen() {
   }, [menuVisible]);
 
   // ── Timer para modo normal (não híbrido) ──────────────────────────────────
+  // Só arma timer para mídias que NÃO são do tipo video/youtube/instagram,
+  // pois esses tipos disparam onVideoEnd autonomamente quando o vídeo termina.
   useEffect(() => {
     if (terminalOrientation === "hybrid") return;
     if (!currentItem) return;
@@ -430,7 +428,6 @@ export default function PlayerScreen() {
     );
   }
 
-  // ── Modo Híbrido: tela dividida ao meio, cada slot exatamente 50% ─────────
   if (terminalOrientation === "hybrid") {
     const screenHeight = Dimensions.get("window").height;
     const contentHeight = screenHeight - footerHeight;
@@ -440,7 +437,6 @@ export default function PlayerScreen() {
       <View ref={rootViewRef} style={styles.root}>
         <ConnectionBanner visible={!isConnected} />
 
-        {/* Slot 1 — metade superior */}
         <View style={[styles.hybridSlotAbsolute, { top: 0, height: slotHeight }]}>
           <HybridSlot
             item={hybridSlot1Item}
@@ -452,10 +448,8 @@ export default function PlayerScreen() {
           />
         </View>
 
-        {/* Divider */}
         <View style={[styles.hybridDivider, { top: slotHeight }]} />
 
-        {/* Slot 2 — metade inferior */}
         <View
           style={[
             styles.hybridSlotAbsolute,
@@ -486,7 +480,6 @@ export default function PlayerScreen() {
     );
   }
 
-  // ── Modo Normal ────────────────────────────────────────────────────────────
   return (
     <View ref={rootViewRef} style={styles.root}>
       <ConnectionBanner visible={!isConnected} />
@@ -547,7 +540,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     marginTop: Spacing.sm,
   },
-  // Hybrid layout — posicionamento absoluto garante 50/50 exato
   hybridSlotAbsolute: {
     position: "absolute",
     left: 0,
