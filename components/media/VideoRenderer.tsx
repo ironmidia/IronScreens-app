@@ -12,18 +12,16 @@ const IDLE_RECOVERY_DELAY_MS = 900;
 const ERROR_ADVANCE_DELAY_MS = 700;
 const END_TOLERANCE_SEC = 0.05;
 
-function getDynamicWatchdogMs(params: {
-  durationSec?: number;
-  realDurationSec?: number;
-}) {
-  const baseSec =
-    params.realDurationSec && params.realDurationSec > 0
-      ? params.realDurationSec
-      : params.durationSec && params.durationSec > 0
-        ? params.durationSec
-        : 15;
-
-  return Math.max(8000, Math.min((baseSec + 2) * 1000, 120000));
+// Watchdog apenas como segurança contra vídeos travados/sem fim.
+// Baseia-se SEMPRE na duração real do vídeo (durationRef) quando disponível.
+// O durationSec do item NÃO é usado para limitar vídeos — só imagens têm duração programada.
+function getSafetyWatchdogMs(realDurationSec?: number) {
+  if (realDurationSec && realDurationSec > 0) {
+    // 10 segundos de margem além da duração real do vídeo
+    return Math.min((realDurationSec + 10) * 1000, 300000); // máx 5 min
+  }
+  // Duração real ainda desconhecida: watchdog inicial generoso de 2 minutos
+  return 120000;
 }
 
 function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
@@ -36,7 +34,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
   const progressedRef = useRef(false);
   const currentTimeRef = useRef(0);
   const durationRef = useRef(0);
-  const watchdogStartedAtRef = useRef<number | null>(null);
   const watchdogMsRef = useRef(0);
 
   useEffect(() => {
@@ -55,7 +52,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
     progressedRef.current = false;
     currentTimeRef.current = 0;
     durationRef.current = 0;
-    watchdogStartedAtRef.current = null;
     watchdogMsRef.current = 0;
 
     console.log("[VideoRenderer] Montando vídeo:", uri);
@@ -65,7 +61,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
         clearTimeout(watchdogRef.current);
         watchdogRef.current = null;
       }
-
       if (idleRecoveryRef.current) {
         clearTimeout(idleRecoveryRef.current);
         idleRecoveryRef.current = null;
@@ -74,7 +69,6 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
 
     const triggerEnd = () => {
       if (endCalledRef.current) return;
-
       endCalledRef.current = true;
       clearAllTimers();
       console.log("[VideoRenderer] Avançando");
@@ -84,20 +78,16 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
     const isNearEnd = () => {
       const duration = Number(durationRef.current) || 0;
       const currentTime = Number(currentTimeRef.current) || 0;
-
       if (!duration || duration <= 0) return false;
-
       return currentTime >= duration - END_TOLERANCE_SEC;
     };
 
+    // Arma (ou re-arma) o watchdog usando a duração REAL do vídeo.
+    // Só re-arma se a duração mudou significativamente.
     const armWatchdog = (realDurationSec?: number) => {
       if (endCalledRef.current) return;
 
-      const timeoutMs = getDynamicWatchdogMs({
-        durationSec,
-        realDurationSec,
-      });
-
+      const timeoutMs = getSafetyWatchdogMs(realDurationSec);
       const sameTimeout = timeoutMs === watchdogMsRef.current;
       if (sameTimeout && watchdogRef.current) return;
 
@@ -107,12 +97,10 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
       }
 
       watchdogMsRef.current = timeoutMs;
-      watchdogStartedAtRef.current = Date.now();
-
-      console.log("[VideoRenderer] Watchdog armado:", timeoutMs, "ms");
+      console.log("[VideoRenderer] Watchdog de segurança armado:", timeoutMs, "ms");
 
       watchdogRef.current = setTimeout(() => {
-        console.warn("[VideoRenderer] Watchdog disparou, avançando por segurança");
+        console.warn("[VideoRenderer] Watchdog de segurança disparou, avançando");
         triggerEnd();
       }, timeoutMs);
     };
@@ -125,41 +113,28 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
         if (endCalledRef.current) return;
 
         if (isNearEnd()) {
-          console.log(
-            "[VideoRenderer] Idle detectado já no final; aguardando flush curto",
-          );
-
+          console.log("[VideoRenderer] Idle detectado já no final; flush curto");
           setTimeout(() => {
-            if (!endCalledRef.current) {
-              triggerEnd();
-            }
+            if (!endCalledRef.current) triggerEnd();
           }, 250);
-
           return;
         }
 
-        console.warn(
-          "[VideoRenderer] Idle fora do fim; tentando recover com play()",
-        );
-
-        try {
-          player.play();
-        } catch {}
+        console.warn("[VideoRenderer] Idle fora do fim; tentando recover com play()");
+        try { player.play(); } catch {}
 
         setTimeout(() => {
           if (endCalledRef.current) return;
-
           const stillNoProgress = currentTimeRef.current <= 0.05;
           if (stillNoProgress) {
-            console.warn(
-              "[VideoRenderer] Sem progresso após recover; avançando",
-            );
+            console.warn("[VideoRenderer] Sem progresso após recover; avançando");
             triggerEnd();
           }
         }, 1200);
       }, IDLE_RECOVERY_DELAY_MS);
     };
 
+    // Watchdog inicial conservador (duração real ainda desconhecida)
     armWatchdog();
 
     let subEnd: { remove: () => void } | null = null;
@@ -168,6 +143,7 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
     let subPlaying: { remove: () => void } | null = null;
 
     try {
+      // playToEnd é o evento principal — avança quando o vídeo termina naturalmente
       subEnd = player.addListener("playToEnd", () => {
         console.log("[VideoRenderer] playToEnd");
         triggerEnd();
@@ -186,6 +162,7 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
           if (nextDuration > 0) {
             durationRef.current = nextDuration;
 
+            // Re-arma watchdog com a duração real assim que ela fica disponível
             if (Math.abs(nextDuration - prevDuration) > 0.2) {
               armWatchdog(nextDuration);
             }
@@ -206,9 +183,7 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
 
     try {
       subPlaying = player.addListener("playingChange", ({ isPlaying }: any) => {
-        if (isPlaying) {
-          startedRef.current = true;
-        }
+        if (isPlaying) startedRef.current = true;
       });
     } catch {}
 
@@ -217,9 +192,7 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
         console.log("[VideoRenderer] statusChange:", status);
 
         if (status === "readyToPlay") {
-          try {
-            player.play();
-          } catch {}
+          try { player.play(); } catch {}
         }
 
         if (status === "idle" && (startedRef.current || progressedRef.current)) {
@@ -236,28 +209,13 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
 
     return () => {
       clearAllTimers();
-
-      try {
-        subEnd?.remove();
-      } catch {}
-
-      try {
-        subStatus?.remove();
-      } catch {}
-
-      try {
-        subTime?.remove();
-      } catch {}
-
-      try {
-        subPlaying?.remove();
-      } catch {}
-
-      try {
-        player.pause();
-      } catch {}
+      try { subEnd?.remove(); } catch {}
+      try { subStatus?.remove(); } catch {}
+      try { subTime?.remove(); } catch {}
+      try { subPlaying?.remove(); } catch {}
+      try { player.pause(); } catch {}
     };
-  }, [player, uri, durationSec]);
+  }, [player, uri]);
 
   return (
     <View style={styles.container}>
@@ -267,8 +225,7 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
         contentFit="cover"
         nativeControls={false}
         fullscreenOptions={{ enable: false }}
-      />
-    </View>
+      />\n    </View>
   );
 }
 
