@@ -16,7 +16,9 @@ allprojects {
   repositories {
     google()
     mavenCentral()
-    maven { url 'https://www.jitpack.io' }
+    // URL canônica do JitPack (sem www.) — evita 403 em builds CI/EAS
+    maven { url 'https://jitpack.io' }
+    maven { url 'https://maven.google.com' }
   }
 }
 
