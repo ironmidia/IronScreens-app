@@ -1,21 +1,30 @@
 // Iron Screens — YouTube Renderer (Native)
-// Usa source={{ html }} para evitar que o YouTube valide o domínio de origem,
-// o que bloquearia embeds de apps com Referer/Origin não registrado.
+// Suporta tanto vídeos normais (watch?v=) quanto Shorts (/shorts/)
+// O endpoint /embed/ID é o mesmo para ambos os formatos.
+//
+// Estratégia para evitar erro 152 (embed bloqueado por origin):
+//   source={{ html }} + baseUrl: 'https://www.youtube.com'
+//   faz o WebView reportar origin = https://www.youtube.com para o iframe,
+//   que é um domínio aceito pelo player de embed do YouTube.
 import React, { memo } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { getYouTubeEmbedUrl } from "@/services/youtubeService";
 
-const DESKTOP_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-  "AppleWebKit/537.36 (KHTML, like Gecko) " +
-  "Chrome/124.0.0.0 Safari/537.36";
+// UA de Smart TV / Chromecast — o YouTube não bloqueia autoplay nesses dispositivos
+const TV_UA =
+  "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) " +
+  "AppleWebKit/538.1 (KHTML, like Gecko) " +
+  "Version/6.0 TV Safari/538.1";
 
 interface YoutubeRendererProps {
   videoId: string;
 }
 
 function buildHtml(embedUrl: string): string {
+  // origin=https://www.youtube.com no src do iframe é o parâmetro que
+  // instrui o player a aceitar postMessage e autoplay desse contexto
+  const urlWithOrigin = embedUrl + "&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com";
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -23,16 +32,31 @@ function buildHtml(embedUrl: string): string {
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
-    iframe { width: 100%; height: 100%; border: none; display: block; }
+    iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
   </style>
 </head>
 <body>
   <iframe
-    src="${embedUrl}"
+    id="yt"
+    src="${urlWithOrigin}"
     allow="autoplay; encrypted-media; picture-in-picture"
     allowfullscreen="false"
     frameborder="0"
   ></iframe>
+  <script>
+    // Envia PLAY via postMessage logo que o iframe carregar (protocolo YouTube IFrame API)
+    var iframe = document.getElementById('yt');
+    iframe.addEventListener('load', function() {
+      setTimeout(function() {
+        try {
+          iframe.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'playVideo', args: [] }),
+            'https://www.youtube.com'
+          );
+        } catch(e) {}
+      }, 500);
+    });
+  </script>
 </body>
 </html>`;
 }
@@ -44,10 +68,8 @@ function YoutubeRenderer({ videoId }: YoutubeRendererProps) {
   return (
     <View style={styles.container}>
       <WebView
-        // source={{ html }} faz o YouTube tratar como origem local (file://)
-        // e não bloqueia o embed por domínio não registrado
         source={{ html, baseUrl: "https://www.youtube.com" }}
-        userAgent={DESKTOP_UA}
+        userAgent={TV_UA}
         style={styles.webview}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback

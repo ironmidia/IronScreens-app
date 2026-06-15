@@ -1,143 +1,104 @@
 // Iron Screens — Instagram Renderer (Native)
-// Carrega o reel/post do Instagram dentro de um HTML wrapper próprio.
-// O wrapper injeta CSS que esconde TODA a UI social do embed do Instagram
-// e dispara autoplay via postMessage logo após o carregamento.
-import React, { memo, useCallback, useRef } from 'react';
+// Estratégia: source={{ uri }} apontando para /embed/captioned/ com
+// User-Agent de TV — o Instagram serve o embed puro para dispositivos
+// de mídia sem exigir login e com autoplay habilitado.
+// O INJECTED_JS oculta toda a UI social (header, footer, botões sociais)
+// e força o vídeo a ocupar 100% da tela.
+import React, { memo, useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 
-const DESKTOP_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-  'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-  'Chrome/124.0.0.0 Safari/537.36';
+// UA de Smart TV — bypass do gate de login do Instagram embed
+const TV_UA =
+  'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) ' +
+  'AppleWebKit/538.1 (KHTML, like Gecko) ' +
+  'Version/6.0 TV Safari/538.1';
 
 /**
- * Normaliza qualquer URL do Instagram para o endpoint /embed/captioned/
- * que é público (não pede login) e suporta autoplay por postMessage.
- *   instagram.com/reel/ID/  →  instagram.com/reel/ID/embed/captioned/
- *   instagram.com/p/ID/     →  instagram.com/p/ID/embed/captioned/
- *   instagram.com/tv/ID/    →  instagram.com/tv/ID/embed/captioned/
+ * Normaliza qualquer URL do Instagram para /embed/captioned/
+ * Suporta: /reel/, /p/, /tv/
+ * Remove todos os query params (utm_source, igsh, etc.) que causam redirects
  */
 function toEmbedUrl(uri: string): string {
   try {
     const url = new URL(uri);
     if (url.hostname.includes('instagram.com')) {
-      const path = url.pathname.replace(/\/+$/, '');
-      const base = path.replace(/\/embed(\/captioned)?$/, '');
-      url.pathname = base + '/embed/captioned/';
+      const path = url.pathname.replace(/\/+$/, '').replace(/\/embed(\/captioned)?$/, '');
+      url.pathname = path + '/embed/captioned/';
       url.search = '';
       url.hash = '';
       return url.toString();
     }
   } catch {
-    // URL inválida — retorna como está
+    // URI inválida — retorna como está
   }
   return uri;
 }
 
-function buildHtml(embedUrl: string): string {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%; height: 100%;
-      background: #000;
-      overflow: hidden;
+// JS injetado após o carregamento:
+// 1. Esconde toda a UI social do Instagram embed
+// 2. Força o vídeo a ocupar a tela toda e fazer autoplay
+const INJECTED_JS = `
+(function() {
+  function applyStyles() {
+    // Esconde UI social — seletores das classes do Instagram /embed/
+    var hide = [
+      '._acan','._acao','._acap','._acas','._acat',
+      '._acax','._acay','._acaz','._acau','._acav','._acaw',
+      'header','footer','nav',
+      '[role="banner"]','[role="navigation"]','[role="contentinfo"]',
+      '.EmbedIGCoreCaption'
+    ];
+    var style = document.getElementById('__iron_ui_hide');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = '__iron_ui_hide';
+      document.head && document.head.appendChild(style);
     }
-    iframe {
-      width: 100%; height: 100%;
-      border: none; display: block;
-      background: #000;
-    }
-  </style>
-</head>
-<body>
-  <iframe
-    id="ig"
-    src="${embedUrl}"
-    allow="autoplay; encrypted-media"
-    allowfullscreen="false"
-    scrolling="no"
-    frameborder="0"
-  ></iframe>
+    style.textContent = hide.join(',') + ' { display: none !important; }\n'
+      + 'body, html { background: #000 !important; overflow: hidden !important; margin: 0 !important; }\n'
+      + 'video { object-fit: cover !important; width: 100vw !important; height: 100vh !important; position: fixed !important; top: 0 !important; left: 0 !important; }\n'
+      + 'div[role="button"] { pointer-events: none !important; }';
 
-  <script>
-    var iframe = document.getElementById('ig');
-
-    // Seletores CSS conhecidos da UI social do Instagram /embed/
-    var hideSelectors = [
-      '._acan', '._acao', '._acap', '._acas', '._acat',
-      '._acax', '._acay', '._acaz',
-      '._acau', '._acav', '._acaw',
-      'header', 'footer', 'nav',
-      '[role="banner"]', '[role="navigation"]', '[role="contentinfo"]'
-    ].join(',');
-
-    var injectStyle = [
-      hideSelectors + ' { display: none !important; }',
-      'body { background: #000 !important; overflow: hidden !important; }',
-      'video { object-fit: cover !important; width: 100vw !important; height: 100vh !important; }'
-    ].join(' ');
-
-    function injectCSS() {
-      try {
-        var doc = iframe.contentDocument || iframe.contentWindow.document;
-        if (!doc || !doc.head) return;
-        var existing = doc.getElementById('__iron_hide');
-        if (existing) return;
-        var style = doc.createElement('style');
-        style.id = '__iron_hide';
-        style.textContent = injectStyle;
-        doc.head.appendChild(style);
-      } catch(e) {
-        // cross-origin — postMessage é o único canal disponível
-      }
-    }
-
-    function triggerAutoplay() {
-      try {
-        iframe.contentWindow.postMessage(JSON.stringify({ type: 'MEDIA_PLAY' }), '*');
-        iframe.contentWindow.postMessage(JSON.stringify({ type: 'PLAY' }), '*');
-      } catch(e) {}
-    }
-
-    iframe.addEventListener('load', function() {
-      injectCSS();
-      triggerAutoplay();
-      setTimeout(function() { injectCSS(); triggerAutoplay(); }, 800);
-      setTimeout(function() { injectCSS(); triggerAutoplay(); }, 2500);
+    // Força autoplay em todos os vídeos encontrados
+    document.querySelectorAll('video').forEach(function(v) {
+      v.muted = false;
+      v.autoplay = true;
+      v.loop = true;
+      if (v.paused) v.play().catch(function() { v.muted = true; v.play(); });
     });
-  </script>
-</body>
-</html>`;
-}
+  }
+
+  // Aplica imediatamente e a cada 1s por 5s (conteúdo carrega de forma assíncrona)
+  applyStyles();
+  var count = 0;
+  var interval = setInterval(function() {
+    applyStyles();
+    if (++count >= 5) clearInterval(interval);
+  }, 1000);
+})();
+true;
+`;
 
 interface InstagramRendererProps {
   uri: string;
 }
 
 function InstagramRenderer({ uri }: InstagramRendererProps) {
-  const webViewRef = useRef<WebView>(null);
   const embedUrl = toEmbedUrl(uri);
-  const html = buildHtml(embedUrl);
 
   const onMessage = useCallback((_e: WebViewMessageEvent) => {
-    // reservado para comunicação futura (ex: fim do vídeo)
+    // reservado para comunicação futura
   }, []);
 
   return (
     <View style={styles.container}>
       <WebView
-        ref={webViewRef}
-        // source={{ html }} com baseUrl evita o redirect de login —
-        // o Instagram não detecta o domínio de origem e serve o embed puro
-        source={{ html, baseUrl: 'https://www.instagram.com' }}
-        userAgent={DESKTOP_UA}
+        source={{ uri: embedUrl }}
+        userAgent={TV_UA}
         style={styles.webview}
         onMessage={onMessage}
+        injectedJavaScript={INJECTED_JS}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
         javaScriptEnabled

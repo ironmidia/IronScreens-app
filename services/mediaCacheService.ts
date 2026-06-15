@@ -1,4 +1,6 @@
-import * as FileSystem from "expo-file-system";
+// expo-file-system/legacy mantém a API antiga (getInfoAsync, downloadAsync, etc.)
+// sem os warnings de deprecação do Expo SDK 54+
+import * as FileSystem from "expo-file-system/legacy";
 
 const CACHE_DIR = `${FileSystem.documentDirectory}media-cache/`;
 const MANIFEST_PATH = `${CACHE_DIR}manifest.json`;
@@ -41,7 +43,6 @@ export async function readCacheManifest(): Promise<CacheManifest> {
     if (!info.exists) {
       return { updatedAt: new Date().toISOString(), items: [] };
     }
-
     const raw = await FileSystem.readAsStringAsync(MANIFEST_PATH);
     const parsed = JSON.parse(raw);
     return {
@@ -85,9 +86,7 @@ export async function syncMediaFile(params: {
 
   if (current) {
     const fileInfo = await FileSystem.getInfoAsync(current.localUri);
-    if (fileInfo.exists) {
-      return current;
-    }
+    if (fileInfo.exists) return current;
   }
 
   const ext =
@@ -115,10 +114,7 @@ export async function syncMediaFile(params: {
     throw new Error(`Falha ao baixar mídia: HTTP ${result.status}`);
   }
 
-  await FileSystem.moveAsync({
-    from: tempUri,
-    to: localUri,
-  });
+  await FileSystem.moveAsync({ from: tempUri, to: localUri });
 
   const manifestItem: CacheManifestItem = {
     mediaId,
@@ -133,12 +129,11 @@ export async function syncMediaFile(params: {
     (item) => !(item.mediaId === mediaId && item.playlistItemId === playlistItemId),
   );
 
-  const nextManifest: CacheManifest = {
+  await writeCacheManifest({
     updatedAt: new Date().toISOString(),
     items: [...filtered, manifestItem],
-  };
+  });
 
-  await writeCacheManifest(nextManifest);
   return manifestItem;
 }
 
@@ -187,12 +182,10 @@ export async function syncPlaylistMediaCache(
     return validKeys.has(key);
   });
 
-  const nextManifest: CacheManifest = {
+  await writeCacheManifest({
     updatedAt: new Date().toISOString(),
     items: nextItems,
-  };
-
-  await writeCacheManifest(nextManifest);
+  });
 
   return localMap;
 }
