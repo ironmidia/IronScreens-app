@@ -443,9 +443,12 @@ export function usePlayer(
     setSlot2Revision((r) => r + 1);
   }, []);
 
+  // FIX: usa estado React (playlist) como fonte primária para garantir que
+  // currentItem seja populado imediatamente após setPlaylist no primeiro render.
+  // O ref é usado apenas como fallback para chamadas síncronas no advance().
   const currentItem = (() => {
     if (terminalOrientation === "hybrid") return null;
-    const list = playlistRef.current.length ? playlistRef.current : playlist;
+    const list = playlist.length ? playlist : playlistRef.current;
     if (!list.length) return null;
     for (let i = 0; i < list.length; i++) {
       const idx = (currentIndexRef.current + i) % list.length;
@@ -456,7 +459,7 @@ export function usePlayer(
 
   const hybridSlot1Item = (() => {
     if (terminalOrientation !== "hybrid") return null;
-    const list = slot1Ref.current.length ? slot1Ref.current : slot1Playlist;
+    const list = slot1Playlist.length ? slot1Playlist : slot1Ref.current;
     if (!list.length) return null;
     for (let i = 0; i < list.length; i++) {
       const idx = (slot1IndexRef.current + i) % list.length;
@@ -467,7 +470,7 @@ export function usePlayer(
 
   const hybridSlot2Item = (() => {
     if (terminalOrientation !== "hybrid") return null;
-    const list = slot2Ref.current.length ? slot2Ref.current : slot2Playlist;
+    const list = slot2Playlist.length ? slot2Playlist : slot2Ref.current;
     if (!list.length) return null;
     for (let i = 0; i < list.length; i++) {
       const idx = (slot2IndexRef.current + i) % list.length;

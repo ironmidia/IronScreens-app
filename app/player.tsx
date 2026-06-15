@@ -489,8 +489,12 @@ export default function PlayerScreen() {
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
-        {hasNoScheduledMedia || !currentItem ? (
+        {/* FIX: separa hasNoScheduledMedia de !currentItem para evitar EmptyScreen
+            durante o carregamento inicial quando currentItem ainda é null */}
+        {hasNoScheduledMedia ? (
           <EmptyScreen />
+        ) : !currentItem ? (
+          <ActivityIndicator size="large" color={Colors.Primary} />
         ) : (
           <CrossfadeView
             triggerKey={`${playbackRevision}:${currentItem.playlistItemId}:${currentItem.media.id}:${currentIndex}`}
