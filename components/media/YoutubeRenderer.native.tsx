@@ -22,11 +22,8 @@ interface YoutubeRendererProps {
   onEnd?: () => void;
 }
 
-// Margem de segurança após o fim do vídeo (ms)
 const END_MARGIN_MS = 3000;
-// Watchdog padrão enquanto a duração real ainda é desconhecida
-const DEFAULT_WATCHDOG_MS = 120000; // 2 minutos
-// Máximo watchdog (5 minutos)
+const DEFAULT_WATCHDOG_MS = 120000;
 const MAX_WATCHDOG_MS = 300000;
 
 function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
@@ -53,7 +50,6 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
     onEndRef.current?.();
   }, []);
 
-  // Recebe mensagens do JS injetado no WebView
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
       if (endCalledRef.current) return;
@@ -61,18 +57,15 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
       try {
         const msg = JSON.parse(e.nativeEvent.data);
 
-        // Vídeo terminou naturalmente
         if (msg.type === "ENDED") {
           console.log("[YoutubeRenderer] ENDED recebido");
           triggerEnd();
           return;
         }
 
-        // Duração real do vídeo chegou — arma (ou re-arma) o watchdog
         if (msg.type === "DURATION" && typeof msg.value === "number" && msg.value > 0) {
           console.log("[YoutubeRenderer] Duração real:", msg.value, "s");
 
-          // Só re-arma se ainda não armou com duração real
           if (!durationArmedRef.current) {
             durationArmedRef.current = true;
 
@@ -82,7 +75,7 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
             }
 
             const watchdogMs = Math.min(
-              (msg.value * 1000) + END_MARGIN_MS,
+              msg.value * 1000 + END_MARGIN_MS,
               MAX_WATCHDOG_MS,
             );
 
@@ -97,33 +90,92 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
           return;
         }
 
-        // currentTime atualizado — se estiver no fim, avança
-        if (msg.type === "TIME" && typeof msg.value === "number" &&
-            typeof msg.duration === "number" && msg.duration > 0) {
-          const nearEnd = msg.value >= msg.duration - 0.5;
-          if (nearEnd) {
+        if (
+          msg.type === "TIME" &&
+          typeof msg.value === "number" &&
+          typeof msg.duration === "number" &&
+          msg.duration > 0
+        ) {
+          if (msg.value >= msg.duration - 0.5) {
             console.log("[YoutubeRenderer] currentTime perto do fim, avançando");
             triggerEnd();
           }
         }
       } catch {
-        // Mensagem sem JSON (legado)
         if (e.nativeEvent.data === "ENDED") triggerEnd();
       }
     },
     [triggerEnd],
   );
 
-  // JS injetado no WebView:
-  // - Detecta fim via postMessage da YouTube IFrame API e evento nativo 'ended'
-  // - Lê a duração real do elemento <video> e envia ao React Native
-  // - Envia currentTime periodicamente para fallback por posição
+  // JS injetado:
+  // 1. Injeta CSS para esconder TODOS os controles/overlay do YouTube
+  // 2. Detecta fim via postMessage + evento nativo 'ended'
+  // 3. Lê duração real e envia ao React Native
+  // 4. Polling de posição como fallback
   const INJECTED_JS = `
 (function() {
   var endSent = false;
   var durationSent = false;
   var pollInterval = null;
 
+  // ---- Ocultar controles do YouTube via CSS ----
+  var style = document.createElement('style');
+  style.textContent = [
+    /* Barra de controles inferior */
+    '.ytp-chrome-bottom',
+    /* Botões de próximo/anterior/pause na tela */
+    '.ytp-chrome-top',
+    /* Gradient overlay clicável */
+    '.ytp-gradient-top',
+    '.ytp-gradient-bottom',
+    /* Painel de pausa com título e capa */
+    '.ytp-pause-overlay',
+    '.ytp-pause-overlay-container',
+    /* Cards e end-screen */
+    '.ytp-ce-element',
+    '.ytp-endscreen-content',
+    /* Watermark do YouTube */
+    '.ytp-watermark',
+    /* Logo no canto */
+    '.ytp-youtube-button',
+    /* Caixa de título no topo */
+    '.ytp-title',
+    /* Tela de autoplay */
+    '.ytp-autonav-endscreen',
+    /* Spinner de loading (mantém, mas pode esconder se quiser) */
+    /* '.ytp-spinner', */
+    /* Info cards */
+    '.ytp-cards-teaser',
+    '.ytp-cards-button',
+    /* Botões de contexto */
+    '.ytp-contextmenu',
+    /* Overlay geral de click/tap */
+    '.ytp-click-to-play'
+  ].join(',') + ' { display: none !important; opacity: 0 !important; pointer-events: none !important; }';
+  document.head.appendChild(style);
+
+  // Re-injeta o CSS após iframes internos carregarem (YouTube usa iframes aninhados)
+  var cssInjected = false;
+  function injectCssIntoIframes() {
+    try {
+      var frames = document.querySelectorAll('iframe');
+      frames.forEach(function(f) {
+        try {
+          var doc = f.contentDocument || f.contentWindow.document;
+          if (doc && !doc.__ironCssInjected) {
+            doc.__ironCssInjected = true;
+            var s = doc.createElement('style');
+            s.textContent = style.textContent;
+            doc.head && doc.head.appendChild(s);
+          }
+        } catch(e) {}
+      });
+    } catch(e) {}
+  }
+  setInterval(injectCssIntoIframes, 800);
+
+  // ---- Detecção de fim e duração ----
   function send(obj) {
     try { window.ReactNativeWebView.postMessage(JSON.stringify(obj)); } catch(e) {}
   }
@@ -135,7 +187,6 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
     send({ type: 'ENDED' });
   }
 
-  // Observa o elemento <video> para ler duração e eventos
   function watchVideo() {
     var v = document.querySelector('video');
     if (!v) {
@@ -143,7 +194,6 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
       return;
     }
 
-    // Lê duração real assim que disponível
     function sendDuration() {
       if (!durationSent && v.duration && isFinite(v.duration) && v.duration > 0) {
         durationSent = true;
@@ -153,23 +203,20 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
 
     v.addEventListener('durationchange', sendDuration);
     v.addEventListener('loadedmetadata', sendDuration);
-    sendDuration(); // tenta imediatamente caso já esteja disponível
+    sendDuration();
 
-    // Evento nativo de fim
     v.addEventListener('ended', function() { notifyEnd(); });
 
-    // Polling de posição — envia TIME para detecção de fim por posição
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(function() {
       if (endSent) { clearInterval(pollInterval); pollInterval = null; return; }
-      sendDuration(); // continua tentando até ter a duração
+      sendDuration();
       if (v.duration && isFinite(v.duration) && v.duration > 0) {
         send({ type: 'TIME', value: v.currentTime, duration: v.duration });
       }
     }, 1000);
   }
 
-  // Escuta postMessage da YouTube IFrame API
   window.addEventListener('message', function(e) {
     try {
       var data = JSON.parse(e.data);
@@ -183,12 +230,10 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
 true;
 `;
 
-  // Arma watchdog padrão ao montar (será re-armado quando a duração real chegar)
   const webviewRef = useRef<WebView>(null);
 
   const onLoadEnd = useCallback(() => {
     if (endCalledRef.current) return;
-    // Watchdog inicial conservador — será substituído quando DURATION chegar
     if (!watchdogRef.current) {
       console.log("[YoutubeRenderer] Watchdog inicial:", DEFAULT_WATCHDOG_MS, "ms");
       watchdogRef.current = setTimeout(() => {
