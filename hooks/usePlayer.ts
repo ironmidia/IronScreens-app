@@ -36,7 +36,6 @@ export interface PlayerState {
   hasNoScheduledMedia: boolean;
   isConnected: boolean;
   isOfflineCache: boolean;
-  // Hybrid mode: independent items per slot
   hybridSlot1Item: PlaybackItem | null;
   hybridSlot2Item: PlaybackItem | null;
 }
@@ -47,21 +46,52 @@ export interface PlayerActions {
 }
 
 /**
- * Returns whether a media item is compatible with the terminal orientation.
- * - hybrid terminal: accepts hybrid_slot_1 and hybrid_slot_2 (handled separately)
- * - horizontal/vertical terminal: exact match or null
+ * Resolve o slot híbrido de um item:
+ * 1. Usa item.hybrid_slot se presente (campo da playlist_items — mais confiável)
+ * 2. Fallback: deriva de media.orientation
+ * 3. Se terminal não é híbrido ou nenhum dos dois definido: retorna undefined
+ */
+function resolveHybridSlot(
+  itemHybridSlot: 1 | 2 | null | undefined,
+  mediaOrientation: string | null | undefined,
+  terminalOrientation: string,
+): 1 | 2 | undefined {
+  if (terminalOrientation !== "hybrid") return undefined;
+
+  // Prioridade 1: campo hybrid_slot da playlist_items
+  if (itemHybridSlot === 1 || itemHybridSlot === 2) return itemHybridSlot;
+
+  // Prioridade 2: derivado de media.orientation
+  if (mediaOrientation === "hybrid_slot_1") return 1;
+  if (mediaOrientation === "hybrid_slot_2") return 2;
+
+  return undefined;
+}
+
+/**
+ * Verifica se um item é compatível com a orientação do terminal.
+ * - Terminal híbrido: aceita mídias com hybrid_slot_1, hybrid_slot_2
+ *   OU itens que tenham hybrid_slot definido na playlist_items.
+ *   Rejeita mídias com orientation horizontal/vertical.
+ * - Terminal horizontal/vertical: match exato ou null.
  */
 function orientationMatch(
   mediaOrientation: string | null | undefined,
   terminalOrientation: string,
+  itemHybridSlot?: 1 | 2 | null,
 ): boolean {
-  if (!mediaOrientation) return true;
   if (terminalOrientation === "hybrid") {
-    return (
-      mediaOrientation === "hybrid_slot_1" ||
-      mediaOrientation === "hybrid_slot_2"
-    );
+    // Aceita se hybrid_slot está definido diretamente no item
+    if (itemHybridSlot === 1 || itemHybridSlot === 2) return true;
+    // Aceita se a mídia é explicitamente de slot híbrido
+    if (mediaOrientation === "hybrid_slot_1" || mediaOrientation === "hybrid_slot_2") return true;
+    // Aceita mídias sem orientação definida (null/undefined) — rende para ambos os slots via hybrid_slot
+    if (!mediaOrientation) return true;
+    // Rejeita mídias explicitamente horizontal ou vertical
+    return false;
   }
+  // Orientação normal: match exato ou null
+  if (!mediaOrientation) return true;
   return mediaOrientation === terminalOrientation;
 }
 
@@ -101,7 +131,6 @@ export function usePlayer(
   const [isConnected, setIsConnected] = useState(true);
   const [isOfflineCache, setIsOfflineCache] = useState(false);
 
-  // Hybrid slot playlists (independent)
   const [slot1Playlist, setSlot1Playlist] = useState<PlaybackItem[]>([]);
   const [slot2Playlist, setSlot2Playlist] = useState<PlaybackItem[]>([]);
   const [slot1Index, setSlot1Index] = useState(0);
@@ -149,15 +178,17 @@ export function usePlayer(
       if (item.item_type === "media" && item.media_id) {
         const media = mediaMap[item.media_id];
         if (!media) continue;
-        if (!orientationMatch(media.orientation, terminalOrientation)) continue;
+
+        // ✅ Passa hybrid_slot do item para orientationMatch
+        if (!orientationMatch(media.orientation, terminalOrientation, item.hybrid_slot)) continue;
         if (!isScheduled(media)) continue;
 
-        const hybridSlot: 1 | 2 | undefined =
-          media.orientation === "hybrid_slot_1"
-            ? 1
-            : media.orientation === "hybrid_slot_2"
-            ? 2
-            : undefined;
+        // ✅ Resolve slot com prioridade: item.hybrid_slot > media.orientation
+        const hybridSlot = resolveHybridSlot(item.hybrid_slot, media.orientation, terminalOrientation);
+
+        console.log(
+          `[Player] Item aceito: ${media.name} | orientation=${media.orientation} | item.hybrid_slot=${item.hybrid_slot} | resolvedSlot=${hybridSlot ?? 'N/A'}`,
+        );
 
         expanded.push({
           playlistItemId: item.id,
@@ -182,7 +213,7 @@ export function usePlayer(
         const validItems = groupItems.filter(
           (gi) =>
             gi.media &&
-            orientationMatch((gi.media as Media).orientation, terminalOrientation) &&
+            orientationMatch((gi.media as Media).orientation, terminalOrientation, item.hybrid_slot) &&
             isScheduled(gi.media as Media),
         );
 
@@ -199,12 +230,7 @@ export function usePlayer(
         if (!selectedItem?.media) continue;
 
         const m = selectedItem.media as Media;
-        const hybridSlot: 1 | 2 | undefined =
-          m.orientation === "hybrid_slot_1"
-            ? 1
-            : m.orientation === "hybrid_slot_2"
-            ? 2
-            : undefined;
+        const hybridSlot = resolveHybridSlot(item.hybrid_slot, m.orientation, terminalOrientation);
 
         expanded.push({
           playlistItemId: item.id,
@@ -217,6 +243,11 @@ export function usePlayer(
     }
 
     console.log("[Player] Playlist final:", expanded.length, "itens");
+    if (terminalOrientation === "hybrid") {
+      const s1 = expanded.filter((i) => i.hybridSlot === 1);
+      const s2 = expanded.filter((i) => i.hybridSlot === 2);
+      console.log(`[Player] Híbrido — Slot 1: ${s1.length} itens | Slot 2: ${s2.length} itens`);
+    }
     return expanded;
   }, [terminalId, terminalOrientation]);
 
@@ -258,11 +289,9 @@ export function usePlayer(
           setSlot2Playlist(s2);
           slot1Ref.current = s1;
           slot2Ref.current = s2;
-          // Reset indices to 0 only if previous item no longer exists
           setSlot1Index((prev) => {
             const found = s1.findIndex(
-              (i) =>
-                i.playlistItemId === slot1Ref.current[prev]?.playlistItemId,
+              (i) => i.playlistItemId === slot1Ref.current[prev]?.playlistItemId,
             );
             const next = found >= 0 ? found : 0;
             slot1IndexRef.current = next;
@@ -270,8 +299,7 @@ export function usePlayer(
           });
           setSlot2Index((prev) => {
             const found = s2.findIndex(
-              (i) =>
-                i.playlistItemId === slot2Ref.current[prev]?.playlistItemId,
+              (i) => i.playlistItemId === slot2Ref.current[prev]?.playlistItemId,
             );
             const next = found >= 0 ? found : 0;
             slot2IndexRef.current = next;
@@ -420,7 +448,6 @@ export function usePlayer(
     setHasNoScheduledMedia(!list.some((i) => isScheduled(i.media)));
   }, [terminalId]);
 
-  // Advance for hybrid slots (called independently by each slot timer)
   const advanceSlot1 = useCallback(() => {
     const list = slot1Ref.current;
     if (!list.length) return;
@@ -489,7 +516,6 @@ export function usePlayer(
     {
       advance,
       reload: loadPlaylist,
-      // expose slot advances via reload is not needed — player.tsx calls them directly
       advanceSlot1,
       advanceSlot2,
     } as any,
