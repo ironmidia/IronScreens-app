@@ -7,11 +7,36 @@ interface WebViewRendererProps {
   uri: string;
 }
 
-// User-Agent de Chrome desktop — evita bloqueios do Instagram e outros sites
-// que recusam WebViews Android com UA padrão.
 const DESKTOP_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+/**
+ * Converte URLs de post do Instagram para o endpoint público de embed,
+ * que não exige login.
+ *   instagram.com/p/ABC/      → instagram.com/p/ABC/embed/
+ *   instagram.com/reel/ABC/   → instagram.com/reel/ABC/embed/
+ *   instagram.com/tv/ABC/     → instagram.com/tv/ABC/embed/
+ * Qualquer outra URL é retornada sem alteração.
+ */
+function resolveInstagramEmbedUrl(uri: string): string {
+  try {
+    const url = new URL(uri);
+    if (url.hostname.includes('instagram.com')) {
+      // Garante que a rota termina com /embed/
+      const path = url.pathname.replace(/\/+$/, '');
+      if (!path.endsWith('/embed')) {
+        url.pathname = path + '/embed/';
+      }
+      // Remove parâmetros de query que forçam redirect para login
+      url.search = '';
+      return url.toString();
+    }
+  } catch {
+    // URI inválida — retorna como está
+  }
+  return uri;
+}
 
 const INJECTED_JS = `
   (function() {
@@ -19,26 +44,22 @@ const INJECTED_JS = `
     document.body.style.padding = '0';
     document.body.style.overflow = 'hidden';
     document.body.style.backgroundColor = '#000';
-
-    // Tenta esconder UI nativa do Instagram (header, nav, etc)
-    var selectors = [
-      'header', 'nav', 'footer',
-      '[role="banner"]', '[role="navigation"]',
-      '._acaz', // barra inferior do Instagram
-    ];
+    // Esconde UI de navegação do Instagram
+    var selectors = ['header', 'nav', 'footer', '[role="banner"]', '[role="navigation"]', '._acaz'];
     selectors.forEach(function(sel) {
-      var els = document.querySelectorAll(sel);
-      els.forEach(function(el) { el.style.display = 'none'; });
+      document.querySelectorAll(sel).forEach(function(el) { el.style.display = 'none'; });
     });
   })();
   true;
 `;
 
 function WebViewRenderer({ uri }: WebViewRendererProps) {
+  const resolvedUri = resolveInstagramEmbedUrl(uri);
+
   return (
     <View style={styles.container}>
       <WebView
-        source={{ uri }}
+        source={{ uri: resolvedUri }}
         style={styles.webview}
         userAgent={DESKTOP_USER_AGENT}
         injectedJavaScript={INJECTED_JS}
@@ -52,7 +73,6 @@ function WebViewRenderer({ uri }: WebViewRendererProps) {
         bounces={false}
         overScrollMode="never"
         allowsFullscreenVideo={false}
-        // Necessário para Instagram carregar mídia corretamente
         mixedContentMode="always"
         thirdPartyCookiesEnabled
       />
