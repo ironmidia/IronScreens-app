@@ -15,22 +15,27 @@ const TICKER_SPEED = 80;
 export const BAR_HEIGHT = 52;
 const FONT_SIZE = 20;
 
-interface Props {
-  config: FooterBarConfig;
+function formatClock(): string {
+  const now = new Date();
+  const date = now.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  const time = now.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  return `${date}  ${time}`;
 }
 
 function useClock(enabled: boolean): string {
-  const [label, setLabel] = useState('');
+  const [label, setLabel] = useState(() => (enabled ? formatClock() : ''));
   useEffect(() => {
     if (!enabled) return;
-    const update = () => {
-      const now = new Date();
-      const date = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setLabel(`${date}  ${time}`);
-    };
-    update();
-    const id = setInterval(update, 1_000);
+    setLabel(formatClock());
+    const id = setInterval(() => setLabel(formatClock()), 1000);
     return () => clearInterval(id);
   }, [enabled]);
   return label;
@@ -45,105 +50,141 @@ interface ScrollTickerProps {
   italic: boolean;
 }
 
-function ScrollTicker({ text, clock, showDatetime, textColor, bold, italic }: ScrollTickerProps) {
+function ScrollTicker({
+  text,
+  clock,
+  showDatetime,
+  textColor,
+  bold,
+  italic,
+}: ScrollTickerProps) {
   const screenWidth = Dimensions.get('window').width;
   const translateX = useRef(new Animated.Value(screenWidth)).current;
   const isRunning = useRef(false);
-  const contentWidthRef = useRef(0);
   const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  const runLoop = useCallback((contentWidth: number) => {
-    if (contentWidth <= 0) return;
-    isRunning.current = true;
-    translateX.setValue(screenWidth);
-    const totalDistance = screenWidth + contentWidth + 120;
-    const duration = (totalDistance / TICKER_SPEED) * 1000;
-    animRef.current = Animated.timing(translateX, {
-      toValue: -(contentWidth + 120),
-      duration,
-      easing: Easing.linear,
-      useNativeDriver: true,
-    });
-    animRef.current.start(({ finished }) => {
-      if (finished && isRunning.current) runLoop(contentWidth);
-    });
-  }, [screenWidth]);
+  // ─── FIX: em vez de um único contentWidthRef que nunca recalcula quando
+  // o clock entra, usamos dois <Text> separados lado a lado dentro do
+  // Animated.View: um para a mensagem e um para o clock.
+  // O Animated.View mede a largura TOTAL dos dois juntos via onLayout,
+  // então quando o clock aparece pela primeira vez a largura real é medida
+  // corretamente e o loop usa o valor certo.
+  // O clock atualiza a cada segundo mas como os dois <Text> são filhos do
+  // mesmo Animated.View, o onLayout re-dispara automaticamente quando a
+  // largura total muda — sem precisar resetar a animação manualmente.
+
+  const runLoop = useCallback(
+    (contentWidth: number) => {
+      if (contentWidth <= 0) return;
+      isRunning.current = true;
+      translateX.setValue(screenWidth);
+      const totalDistance = screenWidth + contentWidth + 120;
+      const duration = (totalDistance / TICKER_SPEED) * 1000;
+      animRef.current = Animated.timing(translateX, {
+        toValue: -(contentWidth + 120),
+        duration,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      });
+      animRef.current.start(({ finished }) => {
+        if (finished && isRunning.current) runLoop(contentWidth);
+      });
+    },
+    [screenWidth],
+  );
 
   const stopLoop = useCallback(() => {
     isRunning.current = false;
     animRef.current?.stop();
   }, []);
 
+  // Reseta animação apenas quando a mensagem principal muda
   const prevText = useRef(text);
   useEffect(() => {
     if (text !== prevText.current) {
       prevText.current = text;
       stopLoop();
-      contentWidthRef.current = 0;
       translateX.setValue(screenWidth);
     }
-  }, [text]);
+  }, [text, stopLoop, screenWidth, translateX]);
 
-  useEffect(() => { return () => { stopLoop(); }; }, []);
+  useEffect(() => {
+    return () => { stopLoop(); };
+  }, [stopLoop]);
 
   const fontWeight = bold ? ('bold' as const) : ('500' as const);
-  const fontStyle  = italic ? ('italic' as const) : ('normal' as const);
+  const fontStyle = italic ? ('italic' as const) : ('normal' as const);
 
-  // String única: evita qualquer quebra entre os dois blocos de texto
-  const fullText = showDatetime && clock
-    ? `${text}     ·     ${clock}`
-    : text;
+  const baseStyle = {
+    fontSize: FONT_SIZE,
+    letterSpacing: 0.3,
+    color: textColor,
+    fontWeight,
+    fontStyle,
+    flexShrink: 0 as const,
+    maxHeight: BAR_HEIGHT,
+    lineHeight: BAR_HEIGHT,
+  };
 
   return (
     <View style={styles.tickerContainer}>
       <Animated.View
         style={[styles.tickerRow, { transform: [{ translateX }] }]}
         onLayout={(e) => {
+          // onLayout dispara sempre que a largura total muda —
+          // inclusive quando o clock aparece ou quando o texto do clock
+          // muda de tamanho (ex: muda de 1 para 2 dígitos num segundo).
+          // Aqui recalculamos e reiniciamos o loop com a largura correta.
           const w = e.nativeEvent.layout.width;
-          if (w > 0 && Math.abs(w - contentWidthRef.current) > 10) {
-            contentWidthRef.current = w;
+          if (w > 0) {
             stopLoop();
             runLoop(w);
           }
         }}
       >
-        {/* Text único com numberOfLines=1 garante linha única absoluta */}
-        <Text
-          numberOfLines={1}
-          ellipsizeMode="clip"
-          style={{
-            fontSize: FONT_SIZE,
-            letterSpacing: 0.3,
-            color: textColor,
-            fontWeight,
-            fontStyle,
-            // Impede qualquer wrap
-            flexShrink: 0,
-            maxHeight: BAR_HEIGHT,
-            lineHeight: BAR_HEIGHT,
-          }}
-        >
-          {fullText}
+        {/* Texto da mensagem */}
+        <Text numberOfLines={1} ellipsizeMode="clip" style={baseStyle}>
+          {text}
         </Text>
+
+        {/* Separador + clock — só renderiza se show_datetime e clock disponível */}
+        {showDatetime && clock ? (
+          <Text numberOfLines={1} ellipsizeMode="clip" style={baseStyle}>
+            {'     ·     '}{clock}
+          </Text>
+        ) : null}
       </Animated.View>
     </View>
   );
 }
 
+interface Props {
+  config: FooterBarConfig;
+}
+
 export default function FooterBar({ config }: Props) {
-  const clock  = useClock(config.show_datetime);
-  const bg     = config.bg_color   || '#1a1a1a';
-  const tc     = config.text_color || '#ffffff';
-  const bold   = !!(config as any).bold;
+  const clock = useClock(config.show_datetime);
+  const bg = config.bg_color || '#1a1a1a';
+  const tc = config.text_color || '#ffffff';
+  const bold = !!(config as any).bold;
   const italic = !!(config as any).italic;
 
-  const fontWeight = bold   ? ('bold'   as const) : ('500' as const);
-  const fontStyle  = italic ? ('italic' as const) : ('normal' as const);
+  const fontWeight = bold ? ('bold' as const) : ('500' as const);
+  const fontStyle = italic ? ('italic' as const) : ('normal' as const);
+
+  const fixedText =
+    config.show_datetime && clock
+      ? `${config.text}     ·     ${clock}`
+      : config.text;
 
   return (
     <View style={[styles.bar, { backgroundColor: bg }]}>
       {config.logo_url ? (
-        <Image source={{ uri: config.logo_url }} style={styles.logo} resizeMode="contain" />
+        <Image
+          source={{ uri: config.logo_url }}
+          style={styles.logo}
+          resizeMode="contain"
+        />
       ) : null}
       {config.logo_url ? (
         <View style={[styles.divider, { backgroundColor: tc, opacity: 0.25 }]} />
@@ -159,11 +200,12 @@ export default function FooterBar({ config }: Props) {
           italic={italic}
         />
       ) : (
-        <>
-          <Text numberOfLines={1} style={[styles.fixedText, { color: tc, fontWeight, fontStyle }]}>
-            {config.text}{config.show_datetime && clock ? `     ·     ${clock}` : ''}
-          </Text>
-        </>
+        <Text
+          numberOfLines={1}
+          style={[styles.fixedText, { color: tc, fontWeight, fontStyle }]}
+        >
+          {fixedText}
+        </Text>
       )}
     </View>
   );
@@ -198,14 +240,12 @@ const styles = StyleSheet.create({
     height: BAR_HEIGHT,
     overflow: 'hidden',
     justifyContent: 'center',
-    // Impede que o container empurre o conteúdo para baixo
     flexDirection: 'row',
   },
   tickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'center',
-    // Nunca quebra
     flexWrap: 'nowrap',
     height: BAR_HEIGHT,
   },
