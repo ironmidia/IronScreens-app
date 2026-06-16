@@ -1,5 +1,6 @@
-// ⚠️ DO NOT change to "expo-file-system/legacy" — the /legacy subpath does not exist
-// in the installed SDK version and will break the Metro bundler. Use the root import only.
+// ⚠️ ATENÇÃO: NÃO altere este import para "expo-file-system/legacy".
+// O subpath /legacy não existe no SDK instalado e causa erro de bundle.
+// Esta linha DEVE ser exatamente: import * as FileSystem from "expo-file-system"
 import * as FileSystem from "expo-file-system";
 
 const CACHE_DIR = `${FileSystem.documentDirectory}media-cache/`;
