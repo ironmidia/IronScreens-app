@@ -1,6 +1,7 @@
-// Migrado para a nova API do expo-file-system (SDK 54+)
-// Usa File e Directory em vez das funções legadas (getInfoAsync, etc.)
-import * as FileSystem from "expo-file-system/legacy";
+// ⚠️ ATENÇÃO: NÃO altere este import para "expo-file-system/legacy".
+// O subpath /legacy não existe no SDK instalado e causa erro de bundle.
+// Esta linha DEVE ser exatamente: import * as FileSystem from "expo-file-system"
+import * as FileSystem from "expo-file-system";
 
 const CACHE_DIR = `${FileSystem.documentDirectory}media-cache/`;
 const MANIFEST_PATH = `${CACHE_DIR}manifest.json`;
