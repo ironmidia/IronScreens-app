@@ -36,7 +36,6 @@ export interface PlayerState {
   hasNoScheduledMedia: boolean;
   isConnected: boolean;
   isOfflineCache: boolean;
-  // Hybrid mode: independent items per slot
   hybridSlot1Item: PlaybackItem | null;
   hybridSlot2Item: PlaybackItem | null;
 }
@@ -46,11 +45,6 @@ export interface PlayerActions {
   reload: () => Promise<void>;
 }
 
-/**
- * Returns whether a media item is compatible with the terminal orientation.
- * - hybrid terminal: accepts hybrid_slot_1 and hybrid_slot_2 (handled separately)
- * - horizontal/vertical terminal: exact match or null
- */
 function orientationMatch(
   mediaOrientation: string | null | undefined,
   terminalOrientation: string,
@@ -65,14 +59,10 @@ function orientationMatch(
   return mediaOrientation === terminalOrientation;
 }
 
-// FIX: no Android, isInternetReachable pode ser null (indeterminado), não false.
-// Tratar null como desconectado causava o banner "Sem conexão" mesmo com internet.
-// Só consideramos desconectado quando isConnected=false OU isInternetReachable=false explicitamente.
 async function isInternetAvailable(): Promise<boolean> {
   try {
     const state = await Network.getNetworkStateAsync();
     if (!state.isConnected) return false;
-    // null = Android ainda não determinou — considera conectado
     if (state.isInternetReachable === false) return false;
     return true;
   } catch {
@@ -94,6 +84,22 @@ function buildPlaylistSignature(items: PlaybackItem[]): string {
   );
 }
 
+// ─── FIX: resolve o item atual a partir de um índice e lista, nunca retorna null
+// se houver qualquer item válido na lista. Percorre circularmente a partir do
+// índice fornecido até encontrar um item com isScheduled=true.
+// Isso evita o frame de currentItem=null que causava a tela preta.
+function resolveItem(
+  list: PlaybackItem[],
+  startIndex: number,
+): PlaybackItem | null {
+  if (!list.length) return null;
+  for (let i = 0; i < list.length; i++) {
+    const idx = (startIndex + i) % list.length;
+    if (isScheduled(list[idx].media)) return list[idx];
+  }
+  return null;
+}
+
 export function usePlayer(
   terminalId: string,
   terminalOrientation: string,
@@ -107,13 +113,20 @@ export function usePlayer(
   const [isConnected, setIsConnected] = useState(true);
   const [isOfflineCache, setIsOfflineCache] = useState(false);
 
-  // Hybrid slot playlists (independent)
+  // ─── FIX: currentItem agora é estado gerenciado, não calculado inline no render.
+  // Isso garante que nunca haja um frame com null entre dois itens válidos.
+  const [currentItem, setCurrentItem] = useState<PlaybackItem | null>(null);
+
   const [slot1Playlist, setSlot1Playlist] = useState<PlaybackItem[]>([]);
   const [slot2Playlist, setSlot2Playlist] = useState<PlaybackItem[]>([]);
   const [slot1Index, setSlot1Index] = useState(0);
   const [slot2Index, setSlot2Index] = useState(0);
   const [slot1Revision, setSlot1Revision] = useState(0);
   const [slot2Revision, setSlot2Revision] = useState(0);
+
+  // ─── FIX: hybridSlot items também viram estado gerenciado pelo mesmo motivo
+  const [hybridSlot1Item, setHybridSlot1Item] = useState<PlaybackItem | null>(null);
+  const [hybridSlot2Item, setHybridSlot2Item] = useState<PlaybackItem | null>(null);
 
   const groupIndicesRef = useRef<Record<string, number>>({});
   const playlistRef = useRef<PlaybackItem[]>([]);
@@ -132,6 +145,27 @@ export function usePlayer(
   useEffect(() => { slot2Ref.current = slot2Playlist; }, [slot2Playlist]);
   useEffect(() => { slot1IndexRef.current = slot1Index; }, [slot1Index]);
   useEffect(() => { slot2IndexRef.current = slot2Index; }, [slot2Index]);
+
+  // ─── FIX: sempre que playlist ou currentIndex mudam, recalcula currentItem
+  // de forma síncrona para que o estado seja atualizado em batch junto com
+  // setPlaylist/setCurrentIndex, sem abrir janela de null entre renders.
+  useEffect(() => {
+    if (terminalOrientation === "hybrid") return;
+    const list = playlistRef.current;
+    const item = resolveItem(list, currentIndexRef.current);
+    setCurrentItem(item);
+  }, [playlist, currentIndex, terminalOrientation]);
+
+  // ─── FIX: recalcula hybrid items quando slots mudam
+  useEffect(() => {
+    if (terminalOrientation !== "hybrid") return;
+    setHybridSlot1Item(resolveItem(slot1Ref.current, slot1IndexRef.current));
+  }, [slot1Playlist, slot1Index, terminalOrientation]);
+
+  useEffect(() => {
+    if (terminalOrientation !== "hybrid") return;
+    setHybridSlot2Item(resolveItem(slot2Ref.current, slot2IndexRef.current));
+  }, [slot2Playlist, slot2Index, terminalOrientation]);
 
   const buildPlaylist = useCallback(async (): Promise<PlaybackItem[]> => {
     const rawItems = await fetchPlaylistItems(terminalId);
@@ -285,8 +319,10 @@ export function usePlayer(
           setSlot1Revision((r) => r + 1);
           setSlot2Revision((r) => r + 1);
         } else {
-          setPlaylist(items);
+          // ─── FIX: atualiza playlistRef ANTES de chamar setPlaylist para que
+          // o useEffect de currentItem já leia a lista nova quando executar.
           playlistRef.current = items;
+          setPlaylist(items);
           setCurrentIndex((prev) => {
             const prevItem = playlistRef.current[prev];
             if (!prevItem) { currentIndexRef.current = 0; return 0; }
@@ -303,8 +339,6 @@ export function usePlayer(
         }
       }
 
-      // hasNoScheduledMedia é sempre recalculado com a lista fresca do servidor.
-      // NÃO recalcular no advance() para evitar falso positivo com playlistRef desatualizado.
       setHasNoScheduledMedia(!items.some((i) => isScheduled(i.media)));
       setIsOfflineCache(offline);
       setError(null);
@@ -387,9 +421,6 @@ export function usePlayer(
     return () => clearInterval(poll);
   }, [loadPlaylist]);
 
-  // Canal Realtime: escuta mudanças em playlist_items, media e media_group_items.
-  // Não escuta UPDATE em terminals aqui — isso é responsabilidade do useRemoteCommands,
-  // evitando dois canais concorrentes no mesmo filtro.
   useEffect(() => {
     const channel = supabase
       .channel(`terminal_${terminalId}`)
@@ -424,7 +455,15 @@ export function usePlayer(
     }
 
     const nextIndex = (currentIndexRef.current + 1) % list.length;
+
+    // ─── FIX: resolve o próximo item ANTES de atualizar o estado.
+    // Assim o setCurrentItem e setCurrentIndex disparam no mesmo batch
+    // do React, sem nenhum frame intermediário com item=null.
+    const nextItem = resolveItem(list, nextIndex);
     currentIndexRef.current = nextIndex;
+
+    // Atualiza item e índice de forma síncrona no mesmo ciclo de render
+    setCurrentItem(nextItem);
     setCurrentIndex(nextIndex);
   }, [terminalId]);
 
@@ -433,6 +472,8 @@ export function usePlayer(
     if (!list.length) return;
     const next = (slot1IndexRef.current + 1) % list.length;
     slot1IndexRef.current = next;
+    // ─── FIX: atualiza o item do slot junto com o índice
+    setHybridSlot1Item(resolveItem(list, next));
     setSlot1Index(next);
     setSlot1Revision((r) => r + 1);
   }, []);
@@ -442,42 +483,11 @@ export function usePlayer(
     if (!list.length) return;
     const next = (slot2IndexRef.current + 1) % list.length;
     slot2IndexRef.current = next;
+    // ─── FIX: atualiza o item do slot junto com o índice
+    setHybridSlot2Item(resolveItem(list, next));
     setSlot2Index(next);
     setSlot2Revision((r) => r + 1);
   }, []);
-
-  const currentItem = (() => {
-    if (terminalOrientation === "hybrid") return null;
-    const list = playlist.length ? playlist : playlistRef.current;
-    if (!list.length) return null;
-    for (let i = 0; i < list.length; i++) {
-      const idx = (currentIndexRef.current + i) % list.length;
-      if (isScheduled(list[idx].media)) return list[idx];
-    }
-    return null;
-  })();
-
-  const hybridSlot1Item = (() => {
-    if (terminalOrientation !== "hybrid") return null;
-    const list = slot1Playlist.length ? slot1Playlist : slot1Ref.current;
-    if (!list.length) return null;
-    for (let i = 0; i < list.length; i++) {
-      const idx = (slot1IndexRef.current + i) % list.length;
-      if (isScheduled(list[idx].media)) return list[idx];
-    }
-    return null;
-  })();
-
-  const hybridSlot2Item = (() => {
-    if (terminalOrientation !== "hybrid") return null;
-    const list = slot2Playlist.length ? slot2Playlist : slot2Ref.current;
-    if (!list.length) return null;
-    for (let i = 0; i < list.length; i++) {
-      const idx = (slot2IndexRef.current + i) % list.length;
-      if (isScheduled(list[idx].media)) return list[idx];
-    }
-    return null;
-  })();
 
   return [
     {

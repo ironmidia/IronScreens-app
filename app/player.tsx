@@ -11,8 +11,6 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
-// ⚠️ NÃO importe expo-keep-awake diretamente — só suporta iOS/Android e quebra o bundle web.
-// Use sempre o hook local que tem variantes .native.ts e .web.ts.
 import { useKeepAwake } from "@/hooks/useKeepAwake";
 import { loadTerminal, clearTerminal } from "@/services/storageService";
 import { usePlayer } from "@/hooks/usePlayer";
@@ -45,9 +43,6 @@ async function applyOrientation(orientation: string) {
   }
 }
 
-// Tipos de mídia que controlam o próprio avanço via onVideoEnd
-// (não usam timer baseado em durationSec)
-// Inclui youtube e instagram pois eles disparam onVideoEnd quando o vídeo termina
 const VIDEO_EVENT_TYPES = ["video", "youtube", "instagram"];
 
 async function captureAndUpload(
@@ -198,8 +193,9 @@ export default function PlayerScreen() {
     hybridSlot2Item,
   } = playerState;
 
-  // FIX: mantém o último item válido em cache para evitar tela preta
-  // durante a transição entre itens (quando currentItem é null por 1 frame).
+  // ─── FIX: lastItemRef mantido apenas como fallback para o primeiro frame
+  // de carregamento (antes de qualquer item chegar). Após isso, currentItem
+  // nunca mais será null entre dois itens válidos (garantido pelo usePlayer).
   const lastItemRef = useRef<PlaybackItem | null>(null);
   if (currentItem) lastItemRef.current = currentItem;
   const displayItem = currentItem ?? lastItemRef.current;
@@ -277,8 +273,6 @@ export default function PlayerScreen() {
   }, [menuVisible]);
 
   // ── Timer para modo normal (não híbrido) ──────────────────────────────────
-  // Só arma timer para mídias que NÃO são do tipo video/youtube/instagram,
-  // pois esses tipos disparam onVideoEnd autonomamente quando o vídeo termina.
   useEffect(() => {
     if (terminalOrientation === "hybrid") return;
     if (!currentItem) return;
@@ -497,14 +491,17 @@ export default function PlayerScreen() {
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
       >
-        {/* FIX: usa displayItem (currentItem ?? lastItemRef) para evitar tela preta
-            durante a transição entre itens. O spinner só aparece no primeiro load,
-            antes de qualquer item ter sido exibido. */}
         {hasNoScheduledMedia ? (
           <EmptyScreen />
         ) : !displayItem ? (
+          // Só exibe spinner no primeiro carregamento, antes de qualquer item
           <ActivityIndicator size="large" color={Colors.Primary} />
         ) : (
+          // ─── FIX: a triggerKey usa o media.id do displayItem.
+          // Como displayItem nunca é null entre dois itens válidos após o
+          // primeiro load (garantido pelo usePlayer), o CrossfadeView sempre
+          // tem conteúdo anterior para exibir enquanto o novo entra,
+          // eliminando o flash de tela preta no loop da playlist.
           <CrossfadeView
             triggerKey={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
           >

@@ -16,71 +16,171 @@ interface YoutubeRendererProps {
   onEnd?: () => void;
 }
 
-// Margem mínima após fim real do vídeo
 const END_MARGIN_MS = 500;
 const DEFAULT_WATCHDOG_MS = 120000;
 const MAX_WATCHDOG_MS = 300000;
 
-// CSS injetado ANTES do conteúdo para garantir que os controles nunca aparecem
-const HIDE_CONTROLS_CSS = `
-  .ytp-chrome-bottom,
-  .ytp-chrome-top,
-  .ytp-gradient-top,
-  .ytp-gradient-bottom,
-  .ytp-pause-overlay,
-  .ytp-pause-overlay-container,
-  .ytp-ce-element,
-  .ytp-endscreen-content,
-  .ytp-watermark,
-  .ytp-youtube-button,
-  .ytp-title,
-  .ytp-autonav-endscreen,
-  .ytp-cards-teaser,
-  .ytp-cards-button,
-  .ytp-contextmenu,
-  .ytp-click-to-play,
-  .ytp-share-button,
-  .ytp-subtitles-button,
-  .ytp-settings-button,
-  .ytp-size-button,
-  .ytp-next-button,
-  .ytp-prev-button,
-  .ytp-fullerscreen-edu-button,
-  .ytp-overflow-button,
-  .ytp-button,
-  .ytp-iv-player-content,
-  .ytp-suggestions-title {
+// ─── Seletores de tudo que precisa sumir ─────────────────────────────────────
+// Usamos tanto display:none quanto height:0/overflow:hidden porque o YouTube
+// consegue sobrescrever display:none via JS inline, mas não consegue sobrescrever
+// height:0 + overflow:hidden + pointer-events:none ao mesmo tempo.
+const HIDE_SELECTORS = [
+  ".ytp-chrome-bottom",       // barra com pause / anterior / próximo
+  ".ytp-chrome-top",          // título e botão de compartilhar
+  ".ytp-gradient-top",
+  ".ytp-gradient-bottom",
+  ".ytp-pause-overlay",
+  ".ytp-pause-overlay-container",
+  ".ytp-ce-element",          // cards de fim de vídeo
+  ".ytp-endscreen-content",   // tela de sugestões
+  ".ytp-watermark",           // logo do YouTube
+  ".ytp-youtube-button",
+  ".ytp-title",
+  ".ytp-title-channel",
+  ".ytp-title-text",
+  ".ytp-autonav-endscreen",
+  ".ytp-cards-teaser",
+  ".ytp-cards-button",
+  ".ytp-contextmenu",
+  ".ytp-click-to-play",
+  ".ytp-share-button",
+  ".ytp-subtitles-button",
+  ".ytp-settings-button",
+  ".ytp-size-button",
+  ".ytp-next-button",
+  ".ytp-prev-button",
+  ".ytp-fullerscreen-edu-button",
+  ".ytp-overflow-button",
+  ".ytp-iv-player-content",
+  ".ytp-suggestions-title",
+  ".ytp-spinner",             // spinner do YouTube (usamos o nativo do app)
+  ".ytp-button",              // qualquer botão genérico do player
+  ".ytp-progress-bar-container", // barra de progresso
+  ".ytp-time-display",        // relógio de tempo
+  ".ytp-volume-panel",        // controle de volume
+  ".ytp-mute-button",
+  ".annotation",              // anotações antigas
+  "#movie_player .ytp-chrome-controls",
+].join(",");
+
+// CSS injetado via <style> — primeira camada de defesa.
+// !important em tudo + height:0 + overflow:hidden impede que o YouTube
+// exiba os controles mesmo se sobrescrever display:none via JS.
+const HIDE_CSS = `
+  ${HIDE_SELECTORS} {
     display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
     opacity: 0 !important;
     pointer-events: none !important;
     visibility: hidden !important;
   }
-  /* Esconde toda a UI mas mantém o video visível */
-  .html5-video-container video {
+  html, body {
+    background: #000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+  }
+  /* Garante que o vídeo ocupa a tela toda */
+  .html5-video-container,
+  #movie_player,
+  video {
+    width: 100vw !important;
+    height: 100vh !important;
     pointer-events: none !important;
   }
 `;
 
-// JS injetado ANTES do conteúdo (injectedJavaScriptBeforeContentLoaded)
+// JS injetado ANTES do conteúdo carregar.
+// Cria o <style> e usa um MutationObserver para re-injetá-lo sempre que o
+// YouTube tentar removê-lo ou adicionar novos controles ao DOM.
 const BEFORE_JS = `
 (function() {
-  var s = document.createElement('style');
-  s.textContent = ${JSON.stringify(HIDE_CONTROLS_CSS)};
-  document.documentElement.appendChild(s);
+  'use strict';
 
-  // Observer para re-injetar quando novos nós entrarem no DOM
-  var observer = new MutationObserver(function() {
-    // garante que o style continua no head
-    if (!document.head.contains(s)) {
-      document.head.appendChild(s);
+  var SELECTORS = ${JSON.stringify(HIDE_SELECTORS)};
+  var CSS = ${JSON.stringify(HIDE_CSS)};
+
+  // ── Injeta / re-injeta o bloco de CSS ──────────────────────────────────────
+  function injectStyle() {
+    var existing = document.getElementById('__iron_hide');
+    if (existing) {
+      existing.textContent = CSS;
+      return existing;
     }
+    var s = document.createElement('style');
+    s.id = '__iron_hide';
+    s.textContent = CSS;
+    (document.head || document.documentElement).appendChild(s);
+    return s;
+  }
+
+  // ── Aplica estilos inline diretamente nos elementos encontrados ──────────────
+  // Mais difícil de sobrescrever do que uma regra CSS porque tem especificidade máxima.
+  function applyInline() {
+    var els = document.querySelectorAll(SELECTORS);
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      el.style.setProperty('display', 'none', 'important');
+      el.style.setProperty('height', '0', 'important');
+      el.style.setProperty('max-height', '0', 'important');
+      el.style.setProperty('overflow', 'hidden', 'important');
+      el.style.setProperty('opacity', '0', 'important');
+      el.style.setProperty('pointer-events', 'none', 'important');
+      el.style.setProperty('visibility', 'hidden', 'important');
+    }
+  }
+
+  var styleEl = injectStyle();
+
+  // ── MutationObserver: re-aplica sempre que o DOM muda ──────────────────────
+  // Observa head E body para capturar quando o YouTube recria controles.
+  var debounceTimer = null;
+  var observer = new MutationObserver(function() {
+    // Re-injeta o style caso tenha sido removido
+    if (!document.head || !document.head.contains(styleEl)) {
+      styleEl = injectStyle();
+    }
+    // Aplica inline com debounce para não travar a thread do browser
+    if (debounceTimer) return;
+    debounceTimer = setTimeout(function() {
+      debounceTimer = null;
+      applyInline();
+    }, 50);
   });
-  observer.observe(document.documentElement, { childList: true, subtree: false });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style', 'class'],
+  });
+
+  // ── setInterval: aplica a cada 500ms como última linha de defesa ────────────
+  // Garante que mesmo que o MutationObserver perca alguma mudança, os controles
+  // sumam rapidamente.
+  var intervalId = setInterval(function() {
+    injectStyle();
+    applyInline();
+  }, 500);
+
+  // Para de observar e limpa o intervalo após 30s (vídeo já deve ter iniciado)
+  setTimeout(function() {
+    clearInterval(intervalId);
+    // Mantém o observer rodando para o caso de tela de sugestões no final
+  }, 30000);
+
+  // Aplica imediatamente na carga inicial
+  injectStyle();
+  applyInline();
 })();
 true;
 `;
 
-// JS injetado APÓS o conteúdo (injectedJavaScript) para detecção de duração e fim
+// JS injetado APÓS o conteúdo — detecção de duração e fim de vídeo.
 const AFTER_JS = `
 (function() {
   var endSent = false;
@@ -124,6 +224,7 @@ const AFTER_JS = `
     }, 1000);
   }
 
+  // Escuta eventos da IFrame API do YouTube como fallback
   window.addEventListener('message', function(e) {
     try {
       var data = JSON.parse(e.data);
@@ -153,7 +254,10 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
   const triggerEnd = useCallback(() => {
     if (endCalledRef.current) return;
     endCalledRef.current = true;
-    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
     console.log("[YoutubeRenderer] Avançando");
     onEndRef.current?.();
   }, []);
@@ -170,12 +274,22 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
           return;
         }
 
-        if (msg.type === "DURATION" && typeof msg.value === "number" && msg.value > 0) {
+        if (
+          msg.type === "DURATION" &&
+          typeof msg.value === "number" &&
+          msg.value > 0
+        ) {
           console.log("[YoutubeRenderer] Duração real:", msg.value, "s");
           if (!durationArmedRef.current) {
             durationArmedRef.current = true;
-            if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
-            const watchdogMs = Math.min(msg.value * 1000 + END_MARGIN_MS, MAX_WATCHDOG_MS);
+            if (watchdogRef.current) {
+              clearTimeout(watchdogRef.current);
+              watchdogRef.current = null;
+            }
+            const watchdogMs = Math.min(
+              msg.value * 1000 + END_MARGIN_MS,
+              MAX_WATCHDOG_MS,
+            );
             console.log("[YoutubeRenderer] Watchdog armado:", watchdogMs, "ms");
             watchdogRef.current = setTimeout(() => {
               console.warn("[YoutubeRenderer] Watchdog disparou");
@@ -185,7 +299,12 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
           return;
         }
 
-        if (msg.type === "TIME" && typeof msg.value === "number" && typeof msg.duration === "number" && msg.duration > 0) {
+        if (
+          msg.type === "TIME" &&
+          typeof msg.value === "number" &&
+          typeof msg.duration === "number" &&
+          msg.duration > 0
+        ) {
           if (msg.value >= msg.duration - 0.5) {
             console.log("[YoutubeRenderer] TIME perto do fim");
             triggerEnd();
@@ -208,16 +327,20 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
   }, [triggerEnd]);
 
   return (
-    <View style={styles.container}>
+    // ─── pointerEvents="box-none" no container: permite que o overlay receba
+    // toques mas não bloqueia o WebView de receber eventos de autoplay/mídia
+    // que vêm do sistema (não do usuário). O overlay é que bloqueia os toques
+    // do usuário, impedindo que o YouTube exiba os controles ao toque.
+    <View style={styles.container} pointerEvents="box-none">
       <WebView
         source={{ uri: embedUri, headers: { Referer: REFERRER, Origin: REFERRER } }}
         userAgent={TV_UA}
         style={styles.webview}
         onMessage={onMessage}
         onLoadEnd={onLoadEnd}
-        // Injetado ANTES do conteúdo — esconde controles desde o início
+        // BEFORE: injeta o CSS antes do YouTube carregar qualquer elemento
         injectedJavaScriptBeforeContentLoaded={BEFORE_JS}
-        // Injetado APÓS — detecção de fim e duração
+        // AFTER: detecção de fim/duração após o player estar pronto
         injectedJavaScript={AFTER_JS}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
@@ -235,20 +358,39 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
         sharedCookiesEnabled
         thirdPartyCookiesEnabled
       />
-      {/* Overlay transparente sobre o WebView: bloqueia qualquer toque que
-          pudesse revelar os controles do YouTube */}
-      <View style={styles.overlay} pointerEvents="box-only" />
+
+      {/*
+        ── Overlay nativo sobre o WebView ─────────────────────────────────────
+        Este View nativo fica em cima de toda a área do WebView.
+        pointerEvents="box-only" faz com que o próprio View capture TODOS os
+        toques e não os repasse para nenhum filho — mas como não tem filhos,
+        os toques simplesmente são absorvidos e nunca chegam ao DOM do YouTube.
+
+        Isso resolve o problema que o CSS não resolve: o usuário não consegue
+        tocar na tela e fazer o YouTube mostrar os controles, independente
+        do que o CSS faça.
+
+        O overlay é transparente, então visualmente nada muda.
+      */}
+      <View style={styles.touchBlocker} pointerEvents="box-only" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
-  webview: { flex: 1, backgroundColor: "#000" },
-  overlay: {
+  container: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  // Ocupa exatamente o mesmo espaço do WebView e fica acima dele (zIndex alto)
+  touchBlocker: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "transparent",
-    zIndex: 10,
+    zIndex: 999,
   },
 });
 
