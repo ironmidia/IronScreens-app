@@ -38,6 +38,8 @@ export interface Media {
   created_at: string;
   updated_at?: string | null;
   local_file_url?: string | null;
+  youtube_start_sec?: number | null;
+  youtube_end_sec?: number | null;
 }
 
 export interface MediaGroup {

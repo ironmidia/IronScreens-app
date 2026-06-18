@@ -1,5 +1,5 @@
 // Iron Screens — YouTube Renderer (Native)
-import React, { memo, useRef, useCallback } from "react";
+import React, { memo, useRef, useCallback, useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { getYouTubeEmbedUrl } from "@/services/youtubeService";
@@ -14,6 +14,8 @@ const TV_UA =
 interface YoutubeRendererProps {
   videoId: string;
   onEnd?: () => void;
+  startSec?: number | null; // ← novo
+  endSec?: number | null; // ← novo
 }
 
 const END_MARGIN_MS = 500;
@@ -25,15 +27,15 @@ const MAX_WATCHDOG_MS = 300000;
 // consegue sobrescrever display:none via JS inline, mas não consegue sobrescrever
 // height:0 + overflow:hidden + pointer-events:none ao mesmo tempo.
 const HIDE_SELECTORS = [
-  ".ytp-chrome-bottom",       // barra com pause / anterior / próximo
-  ".ytp-chrome-top",          // título e botão de compartilhar
+  ".ytp-chrome-bottom", // barra com pause / anterior / próximo
+  ".ytp-chrome-top", // título e botão de compartilhar
   ".ytp-gradient-top",
   ".ytp-gradient-bottom",
   ".ytp-pause-overlay",
   ".ytp-pause-overlay-container",
-  ".ytp-ce-element",          // cards de fim de vídeo
-  ".ytp-endscreen-content",   // tela de sugestões
-  ".ytp-watermark",           // logo do YouTube
+  ".ytp-ce-element", // cards de fim de vídeo
+  ".ytp-endscreen-content", // tela de sugestões
+  ".ytp-watermark", // logo do YouTube
   ".ytp-youtube-button",
   ".ytp-title",
   ".ytp-title-channel",
@@ -53,13 +55,13 @@ const HIDE_SELECTORS = [
   ".ytp-overflow-button",
   ".ytp-iv-player-content",
   ".ytp-suggestions-title",
-  ".ytp-spinner",             // spinner do YouTube (usamos o nativo do app)
-  ".ytp-button",              // qualquer botão genérico do player
+  ".ytp-spinner", // spinner do YouTube (usamos o nativo do app)
+  ".ytp-button", // qualquer botão genérico do player
   ".ytp-progress-bar-container", // barra de progresso
-  ".ytp-time-display",        // relógio de tempo
-  ".ytp-volume-panel",        // controle de volume
+  ".ytp-time-display", // relógio de tempo
+  ".ytp-volume-panel", // controle de volume
   ".ytp-mute-button",
-  ".annotation",              // anotações antigas
+  ".annotation", // anotações antigas
   "#movie_player .ytp-chrome-controls",
 ].join(",");
 
@@ -76,6 +78,7 @@ const HIDE_CSS = `
     pointer-events: none !important;
     visibility: hidden !important;
   }
+
   html, body {
     background: #000 !important;
     margin: 0 !important;
@@ -84,13 +87,33 @@ const HIDE_CSS = `
     user-select: none !important;
     -webkit-user-select: none !important;
   }
-  /* Garante que o vídeo ocupa a tela toda */
-  .html5-video-container,
+
   #movie_player,
-  video {
+  .html5-video-player,
+  .html5-video-container {
+    position: fixed !important;
+    inset: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
+    background: #000 !important;
+    overflow: hidden !important;
+  }
+
+  video {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+    object-position: center center !important;
     pointer-events: none !important;
+    background: #000 !important;
+  }
+
+  iframe {
+    border: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
   }
 `;
 
@@ -238,26 +261,42 @@ const AFTER_JS = `
 true;
 `;
 
-function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
+function YoutubeRenderer({
+  videoId,
+  onEnd,
+  startSec,
+  endSec,
+}: YoutubeRendererProps) {
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
+
   const endCalledRef = useRef(false);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const durationArmedRef = useRef(false);
 
-  const baseUrl = getYouTubeEmbedUrl(videoId);
-  const embedUri =
-    `${baseUrl}` +
-    `&origin=${encodeURIComponent(REFERRER)}` +
-    `&enablejsapi=1`;
+  useEffect(() => {
+    endCalledRef.current = false;
+    durationArmedRef.current = false;
 
-  const triggerEnd = useCallback(() => {
-    if (endCalledRef.current) return;
-    endCalledRef.current = true;
     if (watchdogRef.current) {
       clearTimeout(watchdogRef.current);
       watchdogRef.current = null;
     }
+  }, [videoId, startSec, endSec]);
+
+  const baseUrl = getYouTubeEmbedUrl(videoId, startSec, endSec);
+  const embedUri =
+    `${baseUrl}` + `&origin=${encodeURIComponent(REFERRER)}` + `&enablejsapi=1`;
+
+  const triggerEnd = useCallback(() => {
+    if (endCalledRef.current) return;
+    endCalledRef.current = true;
+
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+
     console.log("[YoutubeRenderer] Avançando");
     onEndRef.current?.();
   }, []);
@@ -265,6 +304,7 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
       if (endCalledRef.current) return;
+
       try {
         const msg = JSON.parse(e.nativeEvent.data);
 
@@ -280,22 +320,39 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
           msg.value > 0
         ) {
           console.log("[YoutubeRenderer] Duração real:", msg.value, "s");
+
           if (!durationArmedRef.current) {
             durationArmedRef.current = true;
+
             if (watchdogRef.current) {
               clearTimeout(watchdogRef.current);
               watchdogRef.current = null;
             }
+
+            const effectiveDurationSec =
+              typeof endSec === "number" && endSec > 0
+                ? Math.max(
+                    0,
+                    endSec -
+                      (typeof startSec === "number" && startSec > 0
+                        ? startSec
+                        : 0),
+                  )
+                : msg.value;
+
             const watchdogMs = Math.min(
-              msg.value * 1000 + END_MARGIN_MS,
+              effectiveDurationSec * 1000 + END_MARGIN_MS,
               MAX_WATCHDOG_MS,
             );
+
             console.log("[YoutubeRenderer] Watchdog armado:", watchdogMs, "ms");
+
             watchdogRef.current = setTimeout(() => {
               console.warn("[YoutubeRenderer] Watchdog disparou");
               triggerEnd();
             }, watchdogMs);
           }
+
           return;
         }
 
@@ -314,12 +371,18 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
         if (e.nativeEvent.data === "ENDED") triggerEnd();
       }
     },
-    [triggerEnd],
+    [triggerEnd, startSec, endSec],
   );
 
   const onLoadEnd = useCallback(() => {
     if (endCalledRef.current || watchdogRef.current) return;
-    console.log("[YoutubeRenderer] Watchdog inicial:", DEFAULT_WATCHDOG_MS, "ms");
+
+    console.log(
+      "[YoutubeRenderer] Watchdog inicial:",
+      DEFAULT_WATCHDOG_MS,
+      "ms",
+    );
+
     watchdogRef.current = setTimeout(() => {
       console.warn("[YoutubeRenderer] Watchdog inicial disparou");
       triggerEnd();
@@ -327,20 +390,17 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
   }, [triggerEnd]);
 
   return (
-    // ─── pointerEvents="box-none" no container: permite que o overlay receba
-    // toques mas não bloqueia o WebView de receber eventos de autoplay/mídia
-    // que vêm do sistema (não do usuário). O overlay é que bloqueia os toques
-    // do usuário, impedindo que o YouTube exiba os controles ao toque.
     <View style={styles.container} pointerEvents="box-none">
       <WebView
-        source={{ uri: embedUri, headers: { Referer: REFERRER, Origin: REFERRER } }}
+        source={{
+          uri: embedUri,
+          headers: { Referer: REFERRER, Origin: REFERRER },
+        }}
         userAgent={TV_UA}
         style={styles.webview}
         onMessage={onMessage}
         onLoadEnd={onLoadEnd}
-        // BEFORE: injeta o CSS antes do YouTube carregar qualquer elemento
         injectedJavaScriptBeforeContentLoaded={BEFORE_JS}
-        // AFTER: detecção de fim/duração após o player estar pronto
         injectedJavaScript={AFTER_JS}
         mediaPlaybackRequiresUserAction={false}
         allowsInlineMediaPlayback
@@ -359,19 +419,6 @@ function YoutubeRenderer({ videoId, onEnd }: YoutubeRendererProps) {
         thirdPartyCookiesEnabled
       />
 
-      {/*
-        ── Overlay nativo sobre o WebView ─────────────────────────────────────
-        Este View nativo fica em cima de toda a área do WebView.
-        pointerEvents="box-only" faz com que o próprio View capture TODOS os
-        toques e não os repasse para nenhum filho — mas como não tem filhos,
-        os toques simplesmente são absorvidos e nunca chegam ao DOM do YouTube.
-
-        Isso resolve o problema que o CSS não resolve: o usuário não consegue
-        tocar na tela e fazer o YouTube mostrar os controles, independente
-        do que o CSS faça.
-
-        O overlay é transparente, então visualmente nada muda.
-      */}
       <View style={styles.touchBlocker} pointerEvents="box-only" />
     </View>
   );

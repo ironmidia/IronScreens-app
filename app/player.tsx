@@ -8,6 +8,7 @@ import {
   Platform,
   BackHandler,
   Dimensions,
+  Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -132,6 +133,26 @@ function HybridSlot({
   );
 }
 
+function TransitionImageOverlay({
+  visible,
+  imageUrl,
+}: {
+  visible: boolean;
+  imageUrl: string | null;
+}) {
+  if (!visible || !imageUrl) return null;
+
+  return (
+    <View pointerEvents="none" style={styles.transitionOverlay}>
+      <Image
+        source={{ uri: imageUrl }}
+        style={styles.transitionImage}
+        resizeMode="cover"
+      />
+    </View>
+  );
+}
+
 export default function PlayerScreen() {
   useKeepAwake();
 
@@ -153,6 +174,17 @@ export default function PlayerScreen() {
 
   const footerConfig = useFooterBar();
   const footerHeight = footerConfig ? BAR_HEIGHT : 0;
+
+  const isVerticalTerminal = terminalOrientation === "vertical" || terminalOrientation === "hybrid";
+  const isHorizontalTerminal = terminalOrientation === "horizontal";
+
+  const transitionImageEnabled = isVerticalTerminal
+    ? !!(footerConfig as any)?.transition_image_vertical_enabled
+    : !!(footerConfig as any)?.transition_image_horizontal_enabled;
+
+  const transitionImageUrl = isVerticalTerminal
+    ? (footerConfig as any)?.transition_image_vertical_url || null
+    : (footerConfig as any)?.transition_image_horizontal_url || null;
 
   useEffect(() => {
     async function init() {
@@ -200,20 +232,36 @@ export default function PlayerScreen() {
   if (currentItem) lastItemRef.current = currentItem;
   const displayItem = currentItem ?? lastItemRef.current;
 
-  const advanceRef = useRef(playerActions.advance);
-  useEffect(() => { advanceRef.current = playerActions.advance; }, [playerActions.advance]);
+  const showTransitionImage =
+    transitionImageEnabled && !!transitionImageUrl && (loading || !displayItem);
 
-  const advanceSlot1Ref = useRef((playerActions as any).advanceSlot1 as () => void);
-  const advanceSlot2Ref = useRef((playerActions as any).advanceSlot2 as () => void);
-  useEffect(() => { advanceSlot1Ref.current = (playerActions as any).advanceSlot1; }, [playerActions]);
-  useEffect(() => { advanceSlot2Ref.current = (playerActions as any).advanceSlot2; }, [playerActions]);
+  const advanceRef = useRef(playerActions.advance);
+  useEffect(() => {
+    advanceRef.current = playerActions.advance;
+  }, [playerActions.advance]);
+
+  const advanceSlot1Ref = useRef(
+    (playerActions as any).advanceSlot1 as () => void,
+  );
+  const advanceSlot2Ref = useRef(
+    (playerActions as any).advanceSlot2 as () => void,
+  );
+  useEffect(() => {
+    advanceSlot1Ref.current = (playerActions as any).advanceSlot1;
+  }, [playerActions]);
+  useEffect(() => {
+    advanceSlot2Ref.current = (playerActions as any).advanceSlot2;
+  }, [playerActions]);
 
   const captureScreenRef = useRef<(() => Promise<string | null>) | null>(null);
 
   useEffect(() => {
     if (!terminalId) return;
     captureScreenRef.current = () => captureAndUpload(terminalId, rootViewRef);
-    console.log("[Player] captureScreenRef registrado para terminal:", terminalId);
+    console.log(
+      "[Player] captureScreenRef registrado para terminal:",
+      terminalId,
+    );
   }, [terminalId]);
 
   useRemoteCommands({
@@ -235,7 +283,10 @@ export default function PlayerScreen() {
         .single();
 
       if (data?.pending_command === "SCREENSHOT" && captureScreenRef.current) {
-        console.log("[Player] Comando pendente detectado no mount:", data.pending_command);
+        console.log(
+          "[Player] Comando pendente detectado no mount:",
+          data.pending_command,
+        );
 
         await supabase
           .from("terminals")
@@ -371,7 +422,9 @@ export default function PlayerScreen() {
 
   useEffect(() => {
     if (!hasNoScheduledMedia) return;
-    const interval = setInterval(() => { playerActions.reload(); }, RECONNECT_INTERVAL_MS);
+    const interval = setInterval(() => {
+      playerActions.reload();
+    }, RECONNECT_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [hasNoScheduledMedia, playerActions]);
 
@@ -396,7 +449,9 @@ export default function PlayerScreen() {
     }
   }, []);
 
-  const handleVideoEnd = useCallback(() => { advanceRef.current(); }, []);
+  const handleVideoEnd = useCallback(() => {
+    advanceRef.current();
+  }, []);
   const handleSlot1VideoEnd = useCallback(() => {
     advanceSlot1Ref.current();
     setSlot1Revision((r) => r + 1);
@@ -439,7 +494,9 @@ export default function PlayerScreen() {
       <View ref={rootViewRef} style={styles.root}>
         <ConnectionBanner visible={!isConnected} />
 
-        <View style={[styles.hybridSlotAbsolute, { top: 0, height: slotHeight }]}>
+        <View
+          style={[styles.hybridSlotAbsolute, { top: 0, height: slotHeight }]}
+        >
           <HybridSlot
             item={hybridSlot1Item}
             revision={slot1Revision}
@@ -468,6 +525,11 @@ export default function PlayerScreen() {
           />
         </View>
 
+        <TransitionImageOverlay
+          visible={showTransitionImage}
+          imageUrl={transitionImageUrl}
+        />
+
         {footerConfig && <FooterBar config={footerConfig} />}
 
         <HiddenMenu
@@ -494,14 +556,8 @@ export default function PlayerScreen() {
         {hasNoScheduledMedia ? (
           <EmptyScreen />
         ) : !displayItem ? (
-          // Só exibe spinner no primeiro carregamento, antes de qualquer item
           <ActivityIndicator size="large" color={Colors.Primary} />
         ) : (
-          // ─── FIX: a triggerKey usa o media.id do displayItem.
-          // Como displayItem nunca é null entre dois itens válidos após o
-          // primeiro load (garantido pelo usePlayer), o CrossfadeView sempre
-          // tem conteúdo anterior para exibir enquanto o novo entra,
-          // eliminando o flash de tela preta no loop da playlist.
           <CrossfadeView
             triggerKey={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
           >
@@ -514,6 +570,11 @@ export default function PlayerScreen() {
           </CrossfadeView>
         )}
       </Pressable>
+
+      <TransitionImageOverlay
+        visible={showTransitionImage}
+        imageUrl={transitionImageUrl}
+      />
 
       {footerConfig && <FooterBar config={footerConfig} />}
 
@@ -568,5 +629,15 @@ const styles = StyleSheet.create({
     right: 0,
     height: 2,
     backgroundColor: "#111",
+  },
+  transitionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    backgroundColor: "#000",
+  },
+
+  transitionImage: {
+    width: "100%",
+    height: "100%",
   },
 });

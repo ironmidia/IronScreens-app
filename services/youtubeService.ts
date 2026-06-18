@@ -31,15 +31,24 @@ export function extractYouTubeId(url: string): string | null {
 }
 
 /**
- * Gera a URL de embed do YouTube.
+ * Gera a URL de embed do YouTube com suporte a tempo de início e fim.
  * Funciona tanto para vídeos normais quanto para Shorts —
  * o endpoint /embed/ID é o mesmo para ambos os formatos.
  */
-export function getYouTubeEmbedUrl(videoId: string): string {
+export function getYouTubeEmbedUrl(
+  videoId: string,
+  startSec?: number | null,
+  endSec?: number | null
+): string {
+  const start = startSec && startSec > 0 ? `&start=${Math.floor(startSec)}` : '';
+  const end = endSec && endSec > 0 ? `&end=${Math.floor(endSec)}` : '';
+
   return (
     `https://www.youtube.com/embed/${videoId}` +
     `?autoplay=1&mute=1&controls=0&loop=1&playlist=${videoId}` +
-    `&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1`
+    `&playsinline=1&rel=0&modestbranding=1&iv_load_policy=3&disablekb=1` +
+    start +
+    end
   );
 }
 

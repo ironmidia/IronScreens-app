@@ -1,17 +1,31 @@
-// Iron Screens — Root Layout
 import { useEffect, useRef } from 'react';
-import { Platform, AppState, BackHandler, ToastAndroid } from 'react-native';
+import { Platform, AppState, BackHandler, ToastAndroid, NativeModules, Linking } from 'react-native';
 import { Stack, useRouter, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
+import * as IntentLauncher from 'expo-intent-launcher';
 
 async function enableImmersiveMode() {
   if (Platform.OS === 'android') {
     await NavigationBar.setVisibilityAsync('hidden');
-    await NavigationBar.setBehaviorAsync('immersive-sticky');
+    await NavigationBar.setBehaviorAsync('overlay-swipe');
     await NavigationBar.setPositionAsync('absolute');
     await NavigationBar.setBackgroundColorAsync('#00000000');
+  }
+}
+
+async function requestOverlayPermission() {
+  if (Platform.OS !== 'android') return;
+  try {
+    // Verifica se já tem a permissão via Settings.canDrawOverlays
+    const { data } = await IntentLauncher.startActivityAsync(
+      IntentLauncher.ActivityAction.MANAGE_OVERLAY_PERMISSION,
+      { data: 'package:com.ironmidia.ironscreens' }
+    );
+  } catch (e) {
+    // Fallback: abre as configurações do app diretamente
+    Linking.openURL('package:com.ironmidia.ironscreens');
   }
 }
 
@@ -19,9 +33,16 @@ export default function RootLayout() {
   const backPressedOnce = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
+  const overlayRequested = useRef(false);
 
   useEffect(() => {
     enableImmersiveMode();
+
+    // Solicita permissão de sobreposição apenas uma vez
+    if (Platform.OS === 'android' && !overlayRequested.current) {
+      overlayRequested.current = true;
+      requestOverlayPermission();
+    }
 
     const appStateSubscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {

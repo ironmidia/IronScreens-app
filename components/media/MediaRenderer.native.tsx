@@ -38,7 +38,14 @@ function MediaRenderer({ media, durationSec, onVideoEnd }: MediaRendererProps) {
       const videoId = extractYouTubeId(media.external_url);
       if (!videoId) return <View style={styles.black} />;
       // onVideoEnd é passado para que o YouTube dispare o avanço ao terminar
-      return <YoutubeRenderer videoId={videoId} onEnd={onVideoEnd} />;
+      return (
+        <YoutubeRenderer
+          videoId={videoId}
+          onEnd={onVideoEnd}
+          startSec={media.youtube_start_sec}
+          endSec={media.youtube_end_sec}
+        />
+      );
     }
 
     case "instagram":
