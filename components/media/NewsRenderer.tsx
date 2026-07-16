@@ -13,6 +13,7 @@ const CATEGORY_THEME: Record<string, string> = {
   Esportes: '#16A34A',
   Economia: '#D97706',
   Saúde: '#E11D48',
+  'Saúde e Ciência': '#E11D48',
   'Região de Campinas': '#0891B2',
 };
 const DEFAULT_THEME_COLOR = '#16A34A';
