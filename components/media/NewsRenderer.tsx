@@ -103,9 +103,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   logo: {
-    width: '85%',
-    height: '30%',
-    marginBottom: 8,
+    width: '100%',
+    height: '42%',
+    marginBottom: 1,
   },
   categoryText: {
     flex: 1,
