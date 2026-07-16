@@ -5,7 +5,7 @@ import { Image } from 'expo-image';
 
 const NEWS_CATEGORY_PREFIX = 'Notícias - ';
 
-const logoSource = require('../../assets/images/Logo_menor_preto.png');
+const logoSource = require('../../assets/images/Iron_icon.png');
 
 // Cor de tema por categoria — usada na faixa do título e no nome da categoria.
 const CATEGORY_THEME: Record<string, string> = {
@@ -58,13 +58,23 @@ function NewsRenderer({ imageUrl, title, category }: NewsRendererProps) {
       <View style={styles.bottomBar}>
         <View style={styles.leftPanel}>
           <RNImage source={logoSource} style={styles.logo} resizeMode="contain" />
-          <Text style={[styles.categoryText, { color: themeColor }]}>
+          <Text
+            style={[styles.categoryText, { color: themeColor }]}
+            numberOfLines={2}
+            adjustsFontSizeToFit
+            minimumFontScale={0.4}
+          >
             {categoryLabel.toUpperCase()}
           </Text>
         </View>
 
         <View style={[styles.rightPanel, { backgroundColor: themeColor }]}>
-          <Text style={styles.titleText} numberOfLines={3}>
+          <Text
+            style={styles.titleText}
+            numberOfLines={3}
+            adjustsFontSizeToFit
+            minimumFontScale={0.4}
+          >
             {title}
           </Text>
         </View>
@@ -89,33 +99,37 @@ const styles = StyleSheet.create({
   leftPanel: {
     width: '22%',
     backgroundColor: '#fff',
-    justifyContent: 'center',
     paddingHorizontal: '6%',
-    paddingVertical: 18,
+    paddingVertical: 14,
   },
   logo: {
     width: '85%',
-    height: '34%',
-    marginBottom: 12,
+    height: '30%',
+    marginBottom: 8,
   },
   categoryText: {
+    flex: 1,
+    width: '100%',
     fontFamily: 'Arial',
-    fontWeight: '800',
-    fontSize: 22,
-    letterSpacing: 0.6,
+    fontWeight: '900',
+    fontSize: 26,
+    letterSpacing: 0.3,
+    textAlignVertical: 'center',
   },
   rightPanel: {
     flex: 1,
-    justifyContent: 'center',
     paddingHorizontal: '4.5%',
-    paddingVertical: 18,
+    paddingVertical: 10,
   },
   titleText: {
+    flex: 1,
+    width: '100%',
     fontFamily: 'Arial',
     fontWeight: '700',
     fontSize: 28,
     lineHeight: 34,
     color: '#fff',
+    textAlignVertical: 'center',
   },
 });
 
