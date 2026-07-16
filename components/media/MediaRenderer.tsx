@@ -7,18 +7,37 @@ import ImageRenderer from "./ImageRenderer";
 import VideoRenderer from "./VideoRenderer";
 import YoutubeRenderer from "./YoutubeRenderer.native";
 import WebViewRenderer from "./WebViewRenderer.native";
+import NewsRenderer, { isNewsMedia } from "./NewsRenderer";
 
 interface MediaRendererProps {
   media: Media;
   durationSec?: number;
+  transitionImageUrl?: string | null;
   onVideoEnd?: () => void;
 }
 
-function MediaRenderer({ media, durationSec, onVideoEnd }: MediaRendererProps) {
+function MediaRenderer({
+  media,
+  durationSec,
+  transitionImageUrl,
+  onVideoEnd,
+}: MediaRendererProps) {
   const resolvedUri = media.local_file_url || media.file_url || null;
 
   switch (media.type) {
     case "image":
+      if (isNewsMedia(media.category)) {
+        return (
+          <NewsRenderer
+            imageUrl={resolvedUri}
+            backgroundUrl={transitionImageUrl ?? null}
+            title={media.name}
+            category={media.category}
+            source={media.company}
+            externalUrl={media.external_url}
+          />
+        );
+      }
       if (!resolvedUri) return <View style={styles.black} />;
       return <ImageRenderer uri={resolvedUri} />;
 

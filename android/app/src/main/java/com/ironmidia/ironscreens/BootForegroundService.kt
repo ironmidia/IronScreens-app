@@ -7,7 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 class BootForegroundService : Service() {
@@ -15,7 +18,16 @@ class BootForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "boot_channel"
         private const val NOTIFICATION_ID = 1001
+        private const val TAG = "IronScreens/BootFgSvc"
+
+        // Alguns TV boxes ignoram startActivity() disparado muito cedo no boot
+        // (SystemUI/launcher ainda não prontos). Tentamos algumas vezes com
+        // atraso crescente antes de desistir; singleTask torna isso seguro
+        // (nunca duplica a activity, só traz a existente pra frente).
+        private val RETRY_DELAYS_MS = listOf(0L, 2000L, 5000L, 10000L)
     }
+
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -25,19 +37,37 @@ class BootForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification())
-        launchMainActivity()
-        stopSelf()
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha ao promover a foreground", e)
+        }
+
+        RETRY_DELAYS_MS.forEach { delayMs ->
+            handler.postDelayed({ launchMainActivity() }, delayMs)
+        }
+
+        handler.postDelayed({ stopSelf() }, RETRY_DELAYS_MS.last() + 1000L)
         return START_NOT_STICKY
     }
 
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
     private fun launchMainActivity() {
-        val launchIntent = Intent(applicationContext, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        try {
+            val launchIntent = Intent(applicationContext, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            applicationContext.startActivity(launchIntent)
+            Log.i(TAG, "MainActivity lançada")
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha ao lançar MainActivity", e)
         }
-        applicationContext.startActivity(launchIntent)
     }
 
     private fun createNotificationChannel() {

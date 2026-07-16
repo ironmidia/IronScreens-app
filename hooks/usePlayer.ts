@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as Network from "expo-network";
-import { PlaybackItem, Media } from "@/services/models";
+import { PlaybackItem, Media, MediaGroupItem } from "@/services/models";
 import {
   fetchPlaylistItems,
   fetchAllMediaForPlaylist,
@@ -31,6 +31,7 @@ export interface PlayerState {
   currentIndex: number;
   playlist: PlaybackItem[];
   playbackRevision: number;
+  cycleTick: number;
   loading: boolean;
   error: string | null;
   hasNoScheduledMedia: boolean;
@@ -43,6 +44,18 @@ export interface PlayerState {
 export interface PlayerActions {
   advance: () => void;
   reload: () => Promise<void>;
+}
+
+function selectGroupItem(
+  validItems: MediaGroupItem[],
+  rotationMode: string,
+  rotationIndex: number,
+): MediaGroupItem | null {
+  if (!validItems.length) return null;
+  if (rotationMode === "random") {
+    return validItems[Math.floor(Math.random() * validItems.length)];
+  }
+  return validItems[rotationIndex % validItems.length];
 }
 
 function orientationMatch(
@@ -107,6 +120,11 @@ export function usePlayer(
   const [playlist, setPlaylist] = useState<PlaybackItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [playbackRevision, setPlaybackRevision] = useState(0);
+  // ─── Incrementado a cada advance(), independente de índice/item mudarem.
+  // Garante remount do MediaRenderer mesmo em playlists de 1 item só, onde
+  // currentIndex/currentItem nunca mudam de valor entre ciclos (sem isso o
+  // VideoRenderer nunca reiniciava o vídeo após o fim).
+  const [cycleTick, setCycleTick] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasNoScheduledMedia, setHasNoScheduledMedia] = useState(false);
@@ -129,6 +147,9 @@ export function usePlayer(
   const [hybridSlot2Item, setHybridSlot2Item] = useState<PlaybackItem | null>(null);
 
   const groupIndicesRef = useRef<Record<string, number>>({});
+  const groupMetaRef = useRef<
+    Record<string, { validItems: MediaGroupItem[]; rotationMode: string }>
+  >({});
   const playlistRef = useRef<PlaybackItem[]>([]);
   const currentIndexRef = useRef(0);
   const playlistSignatureRef = useRef("");
@@ -228,13 +249,16 @@ export function usePlayer(
 
         if (!validItems.length) continue;
 
-        let selectedItem: (typeof validItems)[number];
+        groupMetaRef.current[item.group_id] = {
+          validItems,
+          rotationMode: group.rotation_mode,
+        };
 
-        if (group.rotation_mode === "random") {
-          selectedItem = validItems[Math.floor(Math.random() * validItems.length)];
-        } else {
-          selectedItem = validItems[currentGroupIndex % validItems.length];
-        }
+        const selectedItem = selectGroupItem(
+          validItems,
+          group.rotation_mode,
+          currentGroupIndex,
+        );
 
         if (!selectedItem?.media) continue;
 
@@ -440,6 +464,8 @@ export function usePlayer(
     if (!list.length) return;
 
     const current = list[currentIndexRef.current];
+    let workingList = list;
+
     if (current) {
       logDisplayEvent({
         media_id: current.media.id,
@@ -447,24 +473,52 @@ export function usePlayer(
         displayed_at: new Date().toISOString(),
         duration_sec: current.durationSec,
       });
+
       if (current.groupId) {
-        const prevIdx = groupIndicesRef.current[current.groupId] ?? 0;
-        groupIndicesRef.current[current.groupId] = prevIdx + 1;
+        const groupId = current.groupId;
+        const nextGroupIndex = (groupIndicesRef.current[groupId] ?? 0) + 1;
+        groupIndicesRef.current[groupId] = nextGroupIndex;
         saveGroupIndices(groupIndicesRef.current).catch(() => {});
+
+        // ─── Reavalia localmente a mídia do grupo a cada volta do loop,
+        // em vez de esperar o próximo rebuild (poll/realtime) para trocar.
+        const meta = groupMetaRef.current[groupId];
+        const selected = meta
+          ? selectGroupItem(meta.validItems, meta.rotationMode, nextGroupIndex)
+          : null;
+
+        if (selected?.media) {
+          const m = selected.media as Media;
+          const hybridSlot: 1 | 2 | undefined =
+            m.orientation === "hybrid_slot_1"
+              ? 1
+              : m.orientation === "hybrid_slot_2"
+              ? 2
+              : undefined;
+
+          workingList = list.map((entry) =>
+            entry.groupId === groupId
+              ? { ...entry, media: m, hybridSlot }
+              : entry,
+          );
+          playlistRef.current = workingList;
+          setPlaylist(workingList);
+        }
       }
     }
 
-    const nextIndex = (currentIndexRef.current + 1) % list.length;
+    const nextIndex = (currentIndexRef.current + 1) % workingList.length;
 
     // ─── FIX: resolve o próximo item ANTES de atualizar o estado.
     // Assim o setCurrentItem e setCurrentIndex disparam no mesmo batch
     // do React, sem nenhum frame intermediário com item=null.
-    const nextItem = resolveItem(list, nextIndex);
+    const nextItem = resolveItem(workingList, nextIndex);
     currentIndexRef.current = nextIndex;
 
     // Atualiza item e índice de forma síncrona no mesmo ciclo de render
     setCurrentItem(nextItem);
     setCurrentIndex(nextIndex);
+    setCycleTick((t) => t + 1);
   }, [terminalId]);
 
   const advanceSlot1 = useCallback(() => {
@@ -495,6 +549,7 @@ export function usePlayer(
       currentIndex,
       playlist,
       playbackRevision,
+      cycleTick,
       loading,
       error,
       hasNoScheduledMedia,

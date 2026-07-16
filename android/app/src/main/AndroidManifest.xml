@@ -41,18 +41,18 @@
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
       <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.HOME"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+      </intent-filter>
+      <intent-filter>
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="ironscreens"/>
       </intent-filter>
     </activity>
-
-    <!-- Boot auto-start receiver -->
-    <receiver
-        android:name=".BootReceiver"
-        android:enabled="true"
-        android:exported="true">
+    <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
       <intent-filter android:priority="1000">
         <action android:name="android.intent.action.BOOT_COMPLETED"/>
         <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
@@ -60,13 +60,6 @@
         <category android:name="android.intent.category.DEFAULT"/>
       </intent-filter>
     </receiver>
-
-    <!-- Foreground service para inicialização pós-boot (Android 10+) -->
-    <service
-        android:name=".BootForegroundService"
-        android:enabled="true"
-        android:exported="false"
-        android:foregroundServiceType="mediaPlayback"/>
-
+    <service android:name=".BootForegroundService" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
   </application>
 </manifest>

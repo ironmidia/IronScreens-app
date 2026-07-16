@@ -96,6 +96,7 @@ interface HybridSlotProps {
   item: PlaybackItem | null;
   revision: number;
   slotIndex: number;
+  transitionImageUrl: string | null;
   onVideoEnd: () => void;
   onPressIn: () => void;
   onPressOut: () => void;
@@ -105,6 +106,7 @@ function HybridSlot({
   item,
   revision,
   slotIndex,
+  transitionImageUrl,
   onVideoEnd,
   onPressIn,
   onPressOut,
@@ -125,6 +127,7 @@ function HybridSlot({
             key={`slot${slotIndex}:${revision}:${item.playlistItemId}:${item.media.id}`}
             media={item.media}
             durationSec={item.durationSec}
+            transitionImageUrl={transitionImageUrl}
             onVideoEnd={onVideoEnd}
           />
         </CrossfadeView>
@@ -172,6 +175,7 @@ export default function PlayerScreen() {
   const [slot1Revision, setSlot1Revision] = useState(0);
   const [slot2Revision, setSlot2Revision] = useState(0);
 
+
   const footerConfig = useFooterBar();
   const footerHeight = footerConfig ? BAR_HEIGHT : 0;
 
@@ -218,6 +222,7 @@ export default function PlayerScreen() {
     currentItem,
     currentIndex,
     playbackRevision,
+    cycleTick,
     loading,
     hasNoScheduledMedia,
     isConnected,
@@ -264,50 +269,14 @@ export default function PlayerScreen() {
     );
   }, [terminalId]);
 
+  // Detecção de comando pendente (RESTART/RELOAD_PLAYLIST/SCREENSHOT/UPDATE)
+  // via Realtime + polling de segurança + recheck ao voltar do background —
+  // ver hooks/useRemoteCommands.ts.
   useRemoteCommands({
     terminalId,
     onReload: playerActions.reload,
     captureScreenRef,
   });
-
-  useEffect(() => {
-    if (!terminalId) return;
-
-    async function checkPendingOnMount() {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      const { data } = await supabase
-        .from("terminals")
-        .select("pending_command")
-        .eq("id", terminalId)
-        .single();
-
-      if (data?.pending_command === "SCREENSHOT" && captureScreenRef.current) {
-        console.log(
-          "[Player] Comando pendente detectado no mount:",
-          data.pending_command,
-        );
-
-        await supabase
-          .from("terminals")
-          .update({ pending_command: null, pending_command_at: null })
-          .eq("id", terminalId);
-
-        const url = await captureScreenRef.current();
-        if (url) {
-          await supabase
-            .from("terminals")
-            .update({
-              last_screenshot_url: url,
-              last_screenshot_at: new Date().toISOString(),
-            })
-            .eq("id", terminalId);
-        }
-      }
-    }
-
-    checkPendingOnMount();
-  }, [terminalId]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -501,6 +470,7 @@ export default function PlayerScreen() {
             item={hybridSlot1Item}
             revision={slot1Revision}
             slotIndex={1}
+            transitionImageUrl={transitionImageUrl}
             onVideoEnd={handleSlot1VideoEnd}
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
@@ -519,6 +489,7 @@ export default function PlayerScreen() {
             item={hybridSlot2Item}
             revision={slot2Revision}
             slotIndex={2}
+            transitionImageUrl={transitionImageUrl}
             onVideoEnd={handleSlot2VideoEnd}
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
@@ -559,12 +530,13 @@ export default function PlayerScreen() {
           <ActivityIndicator size="large" color={Colors.Primary} />
         ) : (
           <CrossfadeView
-            triggerKey={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
+            triggerKey={`${playbackRevision}:${cycleTick}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
           >
             <MediaRenderer
-              key={`${playbackRevision}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
+              key={`${playbackRevision}:${cycleTick}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
               media={displayItem.media}
               durationSec={displayItem.durationSec}
+              transitionImageUrl={transitionImageUrl}
               onVideoEnd={handleVideoEnd}
             />
           </CrossfadeView>

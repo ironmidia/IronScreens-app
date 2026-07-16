@@ -1,8 +1,15 @@
 // Iron Screens — Hook para escutar e executar comandos remotos no player
 import { useEffect, useRef } from "react";
-import { Alert, Platform } from "react-native";
+import { Alert, AppState, Platform } from "react-native";
 import { supabase } from "@/services/supabase";
 import { clearPendingCommand, saveScreenshotUrl } from "@/services/terminalService";
+
+// ─── Fallback de confiabilidade: o Android às vezes mata/suspende o socket de
+// Realtime em segundo plano, fazendo o app perder o evento do comando. Sem
+// isso, o comando só some depois que o admin limpa automaticamente (5min) sem
+// nunca ter sido executado. O polling + a checagem ao voltar de background
+// garantem que o comando seja pego mesmo se o Realtime tiver perdido o evento.
+const COMMAND_POLL_INTERVAL_MS = 30_000;
 
 type UseRemoteCommandsOptions = {
   terminalId: string | null;
@@ -17,6 +24,7 @@ export function useRemoteCommands({
   captureScreenRef,
 }: UseRemoteCommandsOptions) {
   const onReloadRef = useRef(onReload);
+  const processingRef = useRef(false);
 
   useEffect(() => {
     onReloadRef.current = onReload;
@@ -28,10 +36,98 @@ export function useRemoteCommands({
       return;
     }
 
-    console.log("[RemoteCmd] Inscrevendo canal para terminal:", terminalId);
+    const runCommand = async (cmd: string) => {
+      console.log("[RemoteCmd] Executando comando:", cmd);
 
-    // Canal dedicado apenas para comandos remotos via postgres_changes em terminals.
-    // Não usa removeAllChannels() para não derrubar o canal do usePlayer.
+      switch (cmd) {
+        case "RELOAD_PLAYLIST":
+          console.log("[RemoteCmd] Executando RELOAD_PLAYLIST...");
+          onReloadRef.current();
+          break;
+
+        case "RESTART":
+          if (Platform.OS !== "web") {
+            try {
+              const Updates = await import("expo-updates");
+              const update = await Updates.checkForUpdateAsync();
+              if (update.isAvailable) await Updates.fetchUpdateAsync();
+              await Updates.reloadAsync();
+            } catch {
+              onReloadRef.current();
+            }
+          } else {
+            onReloadRef.current();
+          }
+          break;
+
+        case "UPDATE":
+          if (Platform.OS !== "web") {
+            try {
+              const Updates = await import("expo-updates");
+              const update = await Updates.checkForUpdateAsync();
+              if (update.isAvailable) {
+                await Updates.fetchUpdateAsync();
+                await Updates.reloadAsync();
+              } else {
+                Alert.alert("Atualização", "Nenhuma atualização disponível no momento.");
+              }
+            } catch {
+              Alert.alert("Atualização", "Não foi possível verificar atualizações.");
+            }
+          } else {
+            Alert.alert("Atualização", "Atualizações não suportadas nesta plataforma.");
+          }
+          break;
+
+        case "SCREENSHOT":
+          if (!captureScreenRef?.current) {
+            console.warn(
+              "[RemoteCmd] captureScreenRef não disponível — player ainda não montado?",
+            );
+            break;
+          }
+          try {
+            console.log("[RemoteCmd] Executando captura de screenshot...");
+            const uri = await captureScreenRef.current();
+            if (uri) {
+              await saveScreenshotUrl(terminalId, uri);
+              console.log("[RemoteCmd] Screenshot salvo com sucesso:", uri);
+            } else {
+              console.error("[RemoteCmd] captureScreenRef retornou null — captura falhou");
+              await supabase
+                .from("terminals")
+                .update({
+                  last_screenshot_at: new Date().toISOString(),
+                  last_screenshot_url: null,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", terminalId);
+            }
+          } catch (e) {
+            console.error("[RemoteCmd] Screenshot falhou com exceção:", e);
+          }
+          break;
+
+        default:
+          console.warn("[RemoteCmd] Comando desconhecido:", cmd);
+      }
+    };
+
+    const handleIncomingCommand = async (cmd: string | null) => {
+      if (!cmd) return;
+
+      console.log("[RemoteCmd] Comando recebido:", cmd);
+
+      try {
+        await clearPendingCommand(terminalId);
+      } catch (e) {
+        console.error("[RemoteCmd] Erro ao limpar comando pendente:", e);
+      }
+
+      await runCommand(cmd);
+    };
+
+    // ─── Caminho rápido: Realtime (instantâneo quando o socket está vivo) ────
     const channel = supabase
       .channel(`remote-cmd-${terminalId}`)
       .on(
@@ -42,101 +138,50 @@ export function useRemoteCommands({
           table: "terminals",
           filter: `id=eq.${terminalId}`,
         },
-        async (payload) => {
+        (payload) => {
           const newRow = payload.new as any;
-          const cmd = newRow?.pending_command as string | null;
-
-          // Ignora updates sem comando pendente (ex: heartbeat, screenshot_url, etc.)
-          if (!cmd) return;
-
-          console.log("[RemoteCmd] Comando recebido:", cmd);
-
-          try {
-            await clearPendingCommand(terminalId);
-          } catch (e) {
-            console.error("[RemoteCmd] Erro ao limpar comando pendente:", e);
-          }
-
-          switch (cmd) {
-            case "RELOAD_PLAYLIST":
-              console.log("[RemoteCmd] Executando RELOAD_PLAYLIST...");
-              onReloadRef.current();
-              break;
-
-            case "RESTART":
-              if (Platform.OS !== "web") {
-                try {
-                  const Updates = await import("expo-updates");
-                  const update = await Updates.checkForUpdateAsync();
-                  if (update.isAvailable) await Updates.fetchUpdateAsync();
-                  await Updates.reloadAsync();
-                } catch {
-                  onReloadRef.current();
-                }
-              } else {
-                onReloadRef.current();
-              }
-              break;
-
-            case "UPDATE":
-              if (Platform.OS !== "web") {
-                try {
-                  const Updates = await import("expo-updates");
-                  const update = await Updates.checkForUpdateAsync();
-                  if (update.isAvailable) {
-                    await Updates.fetchUpdateAsync();
-                    await Updates.reloadAsync();
-                  } else {
-                    Alert.alert("Atualização", "Nenhuma atualização disponível no momento.");
-                  }
-                } catch {
-                  Alert.alert("Atualização", "Não foi possível verificar atualizações.");
-                }
-              } else {
-                Alert.alert("Atualização", "Atualizações não suportadas nesta plataforma.");
-              }
-              break;
-
-            case "SCREENSHOT":
-              if (!captureScreenRef?.current) {
-                console.warn(
-                  "[RemoteCmd] captureScreenRef não disponível — player ainda não montado?",
-                );
-                break;
-              }
-              try {
-                console.log("[RemoteCmd] Executando captura de screenshot...");
-                const uri = await captureScreenRef.current();
-                if (uri) {
-                  await saveScreenshotUrl(terminalId, uri);
-                  console.log("[RemoteCmd] Screenshot salvo com sucesso:", uri);
-                } else {
-                  console.error("[RemoteCmd] captureScreenRef retornou null — captura falhou");
-                  await supabase
-                    .from("terminals")
-                    .update({
-                      last_screenshot_at: new Date().toISOString(),
-                      last_screenshot_url: null,
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq("id", terminalId);
-                }
-              } catch (e) {
-                console.error("[RemoteCmd] Screenshot falhou com exceção:", e);
-              }
-              break;
-
-            default:
-              console.warn("[RemoteCmd] Comando desconhecido:", cmd);
-          }
+          void handleIncomingCommand(newRow?.pending_command ?? null);
         },
       )
       .subscribe((status) => {
         console.log("[RemoteCmd] Status do canal:", status);
       });
 
+    // ─── Rede de segurança: busca ativa do comando pendente. Cobre os casos em
+    // que o Realtime perdeu o evento (app em background, socket derrubado etc).
+    const checkNow = async () => {
+      if (processingRef.current) return;
+      processingRef.current = true;
+      try {
+        const { data } = await supabase
+          .from("terminals")
+          .select("pending_command")
+          .eq("id", terminalId)
+          .maybeSingle();
+        await handleIncomingCommand(data?.pending_command ?? null);
+      } catch (e) {
+        console.error("[RemoteCmd] Erro ao checar comando pendente:", e);
+      } finally {
+        processingRef.current = false;
+      }
+    };
+
+    // Checagem inicial (pequeno atraso para o captureScreenRef já estar registrado).
+    const initialCheckTimer = setTimeout(checkNow, 500);
+
+    const pollInterval = setInterval(checkNow, COMMAND_POLL_INTERVAL_MS);
+
+    // Ao voltar do background, o socket de Realtime pode estar morto — recheca
+    // na hora em vez de esperar o próximo tick do polling.
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkNow();
+    });
+
     return () => {
       console.log("[RemoteCmd] Removendo canal para terminal:", terminalId);
+      clearTimeout(initialCheckTimer);
+      clearInterval(pollInterval);
+      appStateSub.remove();
       supabase.removeChannel(channel);
     };
   }, [terminalId]);

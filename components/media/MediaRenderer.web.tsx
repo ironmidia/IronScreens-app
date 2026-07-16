@@ -6,15 +6,33 @@ import { extractYouTubeId, buildYouTubeEmbedUrl } from '@/services/youtubeServic
 import ImageRenderer from './ImageRenderer';
 import VideoRenderer from './VideoRenderer';
 import WebViewRenderer from './WebViewRenderer.web';
+import NewsRenderer, { isNewsMedia } from './NewsRenderer';
 
 interface MediaRendererProps {
   media: Media;
+  transitionImageUrl?: string | null;
   onVideoEnd?: () => void;
 }
 
-function MediaRenderer({ media, onVideoEnd }: MediaRendererProps) {
+function MediaRenderer({
+  media,
+  transitionImageUrl,
+  onVideoEnd,
+}: MediaRendererProps) {
   switch (media.type) {
     case 'image':
+      if (isNewsMedia(media.category)) {
+        return (
+          <NewsRenderer
+            imageUrl={media.file_url}
+            backgroundUrl={transitionImageUrl ?? null}
+            title={media.name}
+            category={media.category}
+            source={media.company}
+            externalUrl={media.external_url}
+          />
+        );
+      }
       if (!media.file_url) return <View style={styles.black} />;
       return <ImageRenderer uri={media.file_url} />;
 
