@@ -13,16 +13,12 @@
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease --stacktrace"
-      },
-      "env": {
-        "EXPO_USE_COMMUNITY_AUTOLINKING": "1"
       }
     },
     "production": {
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://qfqolsrnneerccagrunm.supabase.co",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmcW9sc3JubmVlcmNjYWdydW5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMjUwOTEsImV4cCI6MjA5MzcwMTA5MX0.n-Z8j6KmnG-DmKVe_Qu2A256GtPPNk_bK8DWDVuItmA",
-        "EXPO_USE_COMMUNITY_AUTOLINKING": "1"
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFmcW9sc3JubmVlcmNjYWdydW5tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxMjUwOTEsImV4cCI6MjA5MzcwMTA5MX0.n-Z8j6KmnG-DmKVe_Qu2A256GtPPNk_bK8DWDVuItmA"
       },
       "android": {
         "gradleCommand": ":app:assembleRelease --stacktrace"
