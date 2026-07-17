@@ -151,6 +151,21 @@ export default function SetupScreen() {
     </>
   );
 
+  // ─── Navegação por controle remoto (D-pad) no passo de PIN ───────────────
+  // O campo de PIN em si usa o teclado nativo do Android (sem foco por
+  // D-pad aqui — digitar é feito pelo próprio teclado do sistema). Só os
+  // botões Voltar/Confirmar precisam ser alcançáveis pelas setas + OK.
+  const confirmDisabled =
+    state.lockedOut || state.confirming || state.pinValue.length !== 5;
+  const { isFocused: isPinActionFocused } = useDpadGridFocus(
+    [1, 1],
+    (row) => {
+      if (row === 0) actions.backToSelect();
+      else if (!confirmDisabled) actions.confirmPin();
+    },
+    state.step === 'pin' && !state.lockedOut,
+  );
+
   // ─── STEP: ENTER PIN ───
   const renderPinStep = () => {
     const t = state.selectedTerminal!;
@@ -160,7 +175,10 @@ export default function SetupScreen() {
         style={styles.pinWrapper}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Pressable style={styles.backBtn} onPress={actions.backToSelect}>
+        <Pressable
+          style={[styles.backBtn, isPinActionFocused(0, 0) && styles.backBtnFocused]}
+          onPress={actions.backToSelect}
+        >
           <MaterialIcons name="arrow-back" size={20} color={Colors.TextMuted} />
           <Text style={styles.backBtnText}>Voltar</Text>
         </Pressable>
@@ -225,11 +243,11 @@ export default function SetupScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.confirmBtn,
-              (state.lockedOut || state.confirming || state.pinValue.length !== 5) && styles.confirmBtnDisabled,
-              pressed && !state.lockedOut && styles.confirmBtnPressed,
+              confirmDisabled && styles.confirmBtnDisabled,
+              (pressed || isPinActionFocused(1, 0)) && !state.lockedOut && styles.confirmBtnPressed,
             ]}
             onPress={actions.confirmPin}
-            disabled={state.lockedOut || state.confirming || state.pinValue.length !== 5}
+            disabled={confirmDisabled}
           >
             {state.confirming ? (
               <ActivityIndicator color={Colors.TextPrimary} size="small" />
@@ -350,7 +368,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
     alignSelf: 'flex-start',
     padding: Spacing.xs,
+    borderRadius: Radius.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
+  backBtnFocused: { borderColor: Colors.TextPrimary },
   backBtnText: { color: Colors.TextMuted, fontSize: Typography.sizes.sm },
 
   pinCard: {
