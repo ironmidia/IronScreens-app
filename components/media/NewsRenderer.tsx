@@ -1,7 +1,8 @@
 // Iron Screens — News Renderer (playlist item flagged as a news article)
 import React, { memo, useState } from 'react';
-import { Image as RNImage, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Image as RNImage, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
+import { useLogicalWindowDimensions } from '@/hooks/useLogicalWindowDimensions';
 
 const NEWS_CATEGORY_PREFIX = 'Notícias - ';
 
@@ -44,7 +45,7 @@ export function newsCategoryLabel(category: string | null | undefined): string {
 
 function NewsRenderer({ imageUrl, title, category }: NewsRendererProps) {
   const [imageFailed, setImageFailed] = useState(false);
-  const { width, height } = useWindowDimensions();
+  const { width, height } = useLogicalWindowDimensions();
   const isPortrait = height > width;
   const categoryLabel = newsCategoryLabel(category);
   const categoryDisplayLabel = CATEGORY_DISPLAY_LABEL[categoryLabel] ?? categoryLabel;

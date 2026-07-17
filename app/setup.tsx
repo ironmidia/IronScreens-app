@@ -20,7 +20,6 @@ import { useSetup } from '@/hooks/useSetup';
 import { Terminal } from '@/services/models';
 import { Colors, Typography, Spacing, Radius } from '@/constants/theme';
 import { useDpadGridFocus } from '@/hooks/useDpadGridFocus';
-import DpadKeyboard from '@/components/setup/DpadKeyboard';
 
 const { width } = Dimensions.get('window');
 
@@ -51,8 +50,8 @@ export default function SetupScreen() {
 
   // ─── Navegação por controle remoto (D-pad) na lista de terminais ─────────
   // Cada terminal é uma "linha" de 1 coluna só; OK seleciona o terminal em
-  // foco. Só fica ativo no passo de seleção (a tela de PIN tem seu próprio
-  // teclado navegável — ver DpadKeyboard).
+  // foco. Só fica ativo no passo de seleção — a tela de PIN usa o teclado
+  // nativo do Android (o teclado próprio ficava grande demais na TV).
   const terminalListLayout = state.terminals.map(() => 1);
   const { row: terminalFocusRow, isFocused: isTerminalFocused } = useDpadGridFocus(
     terminalListLayout,
@@ -155,14 +154,17 @@ export default function SetupScreen() {
   // ─── STEP: ENTER PIN ───
   const renderPinStep = () => {
     const t = state.selectedTerminal!;
-    const confirmDisabled =
-      state.lockedOut || state.confirming || state.pinValue.length !== 5;
 
     return (
       <KeyboardAvoidingView
         style={styles.pinWrapper}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+        <Pressable style={styles.backBtn} onPress={actions.backToSelect}>
+          <MaterialIcons name="arrow-back" size={20} color={Colors.TextMuted} />
+          <Text style={styles.backBtnText}>Voltar</Text>
+        </Pressable>
+
         <View style={styles.pinCard}>
           <View style={styles.pinTerminalRow}>
             <View style={styles.iconBox}>
@@ -184,8 +186,7 @@ export default function SetupScreen() {
 
           <Text style={styles.pinLabel}>PIN de Acesso</Text>
           <Text style={styles.pinHint}>
-            Digite o PIN de 5 dígitos gerado no sistema Iron Screens — use as
-            setas do controle e OK, ou toque no teclado abaixo
+            Digite o PIN de 5 dígitos gerado no sistema Iron Screens
           </Text>
 
           <TextInput
@@ -204,7 +205,7 @@ export default function SetupScreen() {
             autoCorrect={false}
             keyboardType="default"
             editable={!state.lockedOut && !state.confirming}
-            showSoftInputOnFocus={false}
+            autoFocus
           />
 
           {state.lockedOut ? (
@@ -221,16 +222,21 @@ export default function SetupScreen() {
             </View>
           ) : null}
 
-          <DpadKeyboard
-            value={state.pinValue}
-            maxLength={5}
-            onChangeValue={actions.onPinChange}
-            onConfirm={actions.confirmPin}
-            onBack={actions.backToSelect}
-            confirmDisabled={confirmDisabled}
-            confirming={state.confirming}
-            enabled={state.step === 'pin' && !state.lockedOut}
-          />
+          <Pressable
+            style={({ pressed }) => [
+              styles.confirmBtn,
+              (state.lockedOut || state.confirming || state.pinValue.length !== 5) && styles.confirmBtnDisabled,
+              pressed && !state.lockedOut && styles.confirmBtnPressed,
+            ]}
+            onPress={actions.confirmPin}
+            disabled={state.lockedOut || state.confirming || state.pinValue.length !== 5}
+          >
+            {state.confirming ? (
+              <ActivityIndicator color={Colors.TextPrimary} size="small" />
+            ) : (
+              <Text style={styles.confirmBtnText}>Confirmar</Text>
+            )}
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     );

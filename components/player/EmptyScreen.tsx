@@ -1,10 +1,8 @@
 // Iron Screens — Empty / No Scheduled Media Screen
 import React, { memo } from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { Colors, Typography, Spacing } from '@/constants/theme';
-
-const { width, height } = Dimensions.get('window');
 
 function EmptyScreen() {
   return (
@@ -23,8 +21,7 @@ function EmptyScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    width,
-    height,
+    flex: 1,
     backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',

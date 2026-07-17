@@ -7,8 +7,8 @@ import {
   Text,
   Platform,
   BackHandler,
-  Dimensions,
   Image,
+  useWindowDimensions,
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
@@ -24,6 +24,7 @@ import HiddenMenu from "@/components/player/HiddenMenu";
 import ConnectionBanner from "@/components/player/ConnectionBanner";
 import CrossfadeView from "@/components/player/CrossfadeView";
 import FooterBar, { BAR_HEIGHT } from "@/components/player/FooterBar";
+import RotatedViewport from "@/components/player/RotatedViewport";
 import { Colors, Typography, Spacing } from "@/constants/theme";
 import {
   LONG_PRESS_DURATION_MS,
@@ -33,16 +34,13 @@ import { supabase } from "@/services/supabase";
 import { captureRef } from "react-native-view-shot";
 import { PlaybackItem } from "@/services/models";
 
-async function applyOrientation(orientation: string) {
-  if (orientation === "vertical" || orientation === "hybrid") {
-    await ScreenOrientation.lockAsync(
-      ScreenOrientation.OrientationLock.PORTRAIT,
-    );
-  } else {
-    await ScreenOrientation.lockAsync(
-      ScreenOrientation.OrientationLock.LANDSCAPE,
-    );
-  }
+// ─── Muitas TV boxes genéricas não conseguem girar a saída HDMI de verdade
+// (o hardware fica travado em paisagem independente do que o app pede). Por
+// isso o sistema operacional fica sempre travado em paisagem — terminais
+// "verticais"/"híbridos" são simulados girando só o conteúdo do app dentro
+// desse frame (ver RotatedViewport), não a tela do sistema.
+async function applyOrientation(_orientation: string) {
+  await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
 }
 
 const VIDEO_EVENT_TYPES = ["video", "youtube", "instagram"];
@@ -181,6 +179,12 @@ export default function PlayerScreen() {
   const footerHeight = footerConfig ? BAR_HEIGHT : 0;
 
   const isVerticalTerminal = terminalOrientation === "vertical" || terminalOrientation === "hybrid";
+  // ─── PlayerScreen fica FORA do RotatedViewport (é ele quem o renderiza),
+  // então não pode usar o Context de rotação aqui — calcula direto.
+  const rawWindow = useWindowDimensions();
+  const logicalWindow = isVerticalTerminal
+    ? { width: rawWindow.height, height: rawWindow.width }
+    : rawWindow;
   const isHorizontalTerminal = terminalOrientation === "horizontal";
 
   const transitionImageEnabled = isVerticalTerminal
@@ -205,23 +209,32 @@ export default function PlayerScreen() {
       // momento do setup. Se o admin mudou a orientação do terminal depois
       // (ou o setup foi feito antes dessa mudança), o box ficava preso na
       // orientação antiga pra sempre. Busca a configuração atual do sistema
-      // antes de aplicar; cai pro cache local só se estiver offline.
+      // antes de aplicar.
+      //
+      // Como o app sobe sozinho no boot do Android (BootForegroundService),
+      // a rede/Wi-Fi pode ainda não estar pronta na primeira tentativa — sem
+      // retry, uma falha de rede nesse momento específico fazia cair pro
+      // cache antigo pro resto da sessão inteira. Tenta algumas vezes com
+      // espera antes de desistir e usar o cache local.
       let resolvedOrientation = orientation || "horizontal";
       let resolvedName = name;
-      try {
-        const remote = await fetchTerminalById(tid);
-        if (remote) {
-          resolvedOrientation = remote.orientation || resolvedOrientation;
-          resolvedName = remote.name || resolvedName;
-          if (
-            remote.orientation !== orientation ||
-            remote.name !== name
-          ) {
-            await saveTerminal(tid, resolvedOrientation, resolvedName || "");
+      const FETCH_RETRY_DELAYS_MS = [0, 1500, 3000, 5000, 8000];
+
+      for (const delay of FETCH_RETRY_DELAYS_MS) {
+        if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+        try {
+          const remote = await fetchTerminalById(tid);
+          if (remote) {
+            resolvedOrientation = remote.orientation || resolvedOrientation;
+            resolvedName = remote.name || resolvedName;
+            if (remote.orientation !== orientation || remote.name !== name) {
+              await saveTerminal(tid, resolvedOrientation, resolvedName || "");
+            }
+            break;
           }
+        } catch {
+          // rede ainda não disponível — tenta de novo no próximo delay
         }
-      } catch {
-        // offline no boot: segue com o que tem em cache local
       }
 
       setTerminalOrientation(resolvedOrientation);
@@ -490,46 +503,95 @@ export default function PlayerScreen() {
   }
 
   if (terminalOrientation === "hybrid") {
-    const screenHeight = Dimensions.get("window").height;
-    const contentHeight = screenHeight - footerHeight;
+    const contentHeight = logicalWindow.height - footerHeight;
     const slotHeight = Math.floor(contentHeight / 2);
 
     return (
+      <RotatedViewport rotate={isVerticalTerminal}>
+        <View ref={rootViewRef} style={styles.root}>
+          <ConnectionBanner visible={!isConnected} />
+
+          <View
+            style={[styles.hybridSlotAbsolute, { top: 0, height: slotHeight }]}
+          >
+            <HybridSlot
+              item={hybridSlot1Item}
+              revision={slot1Revision}
+              slotIndex={1}
+              transitionImageUrl={transitionImageUrl}
+              onVideoEnd={handleSlot1VideoEnd}
+              onPressIn={handlePressIn}
+              onPressOut={handlePressOut}
+            />
+          </View>
+
+          <View style={[styles.hybridDivider, { top: slotHeight }]} />
+
+          <View
+            style={[
+              styles.hybridSlotAbsolute,
+              { top: slotHeight + 2, height: slotHeight - 2 },
+            ]}
+          >
+            <HybridSlot
+              item={hybridSlot2Item}
+              revision={slot2Revision}
+              slotIndex={2}
+              transitionImageUrl={transitionImageUrl}
+              onVideoEnd={handleSlot2VideoEnd}
+              onPressIn={handlePressIn}
+              onPressOut={handlePressOut}
+            />
+          </View>
+
+          <TransitionImageOverlay
+            visible={showTransitionImage}
+            imageUrl={transitionImageUrl}
+          />
+
+          {footerConfig && <FooterBar config={footerConfig} />}
+
+          <HiddenMenu
+            visible={menuVisible}
+            terminalName={terminalName || "Terminal"}
+            terminalId={terminalId}
+            onClose={() => setMenuVisible(false)}
+            onChangeTerminal={handleChangeTerminal}
+            onReload={handleReload}
+          />
+        </View>
+      </RotatedViewport>
+    );
+  }
+
+  return (
+    <RotatedViewport rotate={isVerticalTerminal}>
       <View ref={rootViewRef} style={styles.root}>
         <ConnectionBanner visible={!isConnected} />
 
-        <View
-          style={[styles.hybridSlotAbsolute, { top: 0, height: slotHeight }]}
+        <Pressable
+          style={[styles.touchZone, { bottom: footerHeight }]}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
         >
-          <HybridSlot
-            item={hybridSlot1Item}
-            revision={slot1Revision}
-            slotIndex={1}
-            transitionImageUrl={transitionImageUrl}
-            onVideoEnd={handleSlot1VideoEnd}
-            onPressIn={handlePressIn}
-            onPressOut={handlePressOut}
-          />
-        </View>
-
-        <View style={[styles.hybridDivider, { top: slotHeight }]} />
-
-        <View
-          style={[
-            styles.hybridSlotAbsolute,
-            { top: slotHeight + 2, height: slotHeight - 2 },
-          ]}
-        >
-          <HybridSlot
-            item={hybridSlot2Item}
-            revision={slot2Revision}
-            slotIndex={2}
-            transitionImageUrl={transitionImageUrl}
-            onVideoEnd={handleSlot2VideoEnd}
-            onPressIn={handlePressIn}
-            onPressOut={handlePressOut}
-          />
-        </View>
+          {hasNoScheduledMedia ? (
+            <EmptyScreen />
+          ) : !displayItem ? (
+            <ActivityIndicator size="large" color={Colors.Primary} />
+          ) : (
+            <CrossfadeView
+              triggerKey={`${playbackRevision}:${cycleTick}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
+            >
+              <MediaRenderer
+                key={`${playbackRevision}:${cycleTick}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
+                media={displayItem.media}
+                durationSec={displayItem.durationSec}
+                transitionImageUrl={transitionImageUrl}
+                onVideoEnd={handleVideoEnd}
+              />
+            </CrossfadeView>
+          )}
+        </Pressable>
 
         <TransitionImageOverlay
           visible={showTransitionImage}
@@ -547,53 +609,7 @@ export default function PlayerScreen() {
           onReload={handleReload}
         />
       </View>
-    );
-  }
-
-  return (
-    <View ref={rootViewRef} style={styles.root}>
-      <ConnectionBanner visible={!isConnected} />
-
-      <Pressable
-        style={[styles.touchZone, { bottom: footerHeight }]}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-      >
-        {hasNoScheduledMedia ? (
-          <EmptyScreen />
-        ) : !displayItem ? (
-          <ActivityIndicator size="large" color={Colors.Primary} />
-        ) : (
-          <CrossfadeView
-            triggerKey={`${playbackRevision}:${cycleTick}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
-          >
-            <MediaRenderer
-              key={`${playbackRevision}:${cycleTick}:${displayItem.playlistItemId}:${displayItem.media.id}:${currentIndex}`}
-              media={displayItem.media}
-              durationSec={displayItem.durationSec}
-              transitionImageUrl={transitionImageUrl}
-              onVideoEnd={handleVideoEnd}
-            />
-          </CrossfadeView>
-        )}
-      </Pressable>
-
-      <TransitionImageOverlay
-        visible={showTransitionImage}
-        imageUrl={transitionImageUrl}
-      />
-
-      {footerConfig && <FooterBar config={footerConfig} />}
-
-      <HiddenMenu
-        visible={menuVisible}
-        terminalName={terminalName || "Terminal"}
-        terminalId={terminalId}
-        onClose={() => setMenuVisible(false)}
-        onChangeTerminal={handleChangeTerminal}
-        onReload={handleReload}
-      />
-    </View>
+    </RotatedViewport>
   );
 }
 
