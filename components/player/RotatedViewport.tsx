@@ -17,7 +17,7 @@ interface RotatedViewportProps {
 export default function RotatedViewport({
   rotate,
   children,
-  degrees = 90,
+  degrees = -90,
 }: RotatedViewportProps) {
   const { width, height } = useWindowDimensions();
 
