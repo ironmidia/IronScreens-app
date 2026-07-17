@@ -50,6 +50,47 @@ export async function setTerminalOnline(terminalId: string): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Reivindica o terminal para este dispositivo (grava device_id). Chamado só
+ * na configuração (setup), nunca no heartbeat — senão dois aparelhos
+ * alternando heartbeat mascarariam o conflito de posse um do outro.
+ */
+export async function claimTerminal(
+  terminalId: string,
+  deviceId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("terminals")
+    .update({
+      device_id: deviceId,
+      status: "online",
+      last_heartbeat: now,
+      updated_at: now,
+    })
+    .eq("id", terminalId);
+
+  if (error) throw error;
+}
+
+/**
+ * Retorna o device_id atualmente dono do terminal (null = nunca reivindicado
+ * por essa versão do app, ou terminal inexistente).
+ */
+export async function fetchTerminalOwnerDeviceId(
+  terminalId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("terminals")
+    .select("device_id")
+    .eq("id", terminalId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return (data as { device_id: string | null }).device_id ?? null;
+}
+
 /** Marca o terminal como offline */
 export async function setTerminalOffline(terminalId: string): Promise<void> {
   const { error } = await supabase

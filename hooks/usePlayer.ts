@@ -12,7 +12,9 @@ import { logDisplayEvent } from "@/services/displayEventService";
 import {
   setTerminalOnline,
   setTerminalOffline,
+  fetchTerminalOwnerDeviceId,
 } from "@/services/terminalService";
+import { getDeviceId } from "@/services/deviceService";
 import {
   saveGroupIndices,
   loadGroupIndices,
@@ -39,6 +41,8 @@ export interface PlayerState {
   isOfflineCache: boolean;
   hybridSlot1Item: PlaybackItem | null;
   hybridSlot2Item: PlaybackItem | null;
+  /** true quando outro aparelho reivindicou este terminal (mesmo PIN usado em 2 telas) */
+  isKicked: boolean;
 }
 
 export interface PlayerActions {
@@ -130,6 +134,8 @@ export function usePlayer(
   const [hasNoScheduledMedia, setHasNoScheduledMedia] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
   const [isOfflineCache, setIsOfflineCache] = useState(false);
+  const [isKicked, setIsKicked] = useState(false);
+  const localDeviceIdRef = useRef<string | null>(null);
 
   // ─── FIX: currentItem agora é estado gerenciado, não calculado inline no render.
   // Isso garante que nunca haja um frame com null entre dois itens válidos.
@@ -428,11 +434,26 @@ export function usePlayer(
   useEffect(() => { loadPlaylist(true); }, [loadPlaylist]);
 
   useEffect(() => {
+    getDeviceId().then((id) => { localDeviceIdRef.current = id; });
+  }, []);
+
+  useEffect(() => {
     const heartbeat = setInterval(async () => {
       try {
         await setTerminalOnline(terminalId);
         setIsConnected(true);
         if (isOfflineCache) loadPlaylist();
+
+        // ─── Detecta se outro aparelho reivindicou este terminal (mesmo PIN
+        // usado em duas telas). Sem isso os dois ficam brigando pelos mesmos
+        // comandos remotos e heartbeats, travando a reprodução de ambos.
+        const localId = localDeviceIdRef.current;
+        if (localId) {
+          const ownerId = await fetchTerminalOwnerDeviceId(terminalId);
+          if (ownerId && ownerId !== localId) {
+            setIsKicked(true);
+          }
+        }
       } catch {
         setIsConnected(false);
       }
@@ -557,6 +578,7 @@ export function usePlayer(
       isOfflineCache,
       hybridSlot1Item,
       hybridSlot2Item,
+      isKicked,
     },
     {
       advance,

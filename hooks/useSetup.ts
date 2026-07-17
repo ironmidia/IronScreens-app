@@ -1,8 +1,9 @@
 // Iron Screens — Setup Hook (Terminal Selection + PIN Validation)
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Terminal } from '@/services/models';
-import { fetchTerminals, setTerminalOnline, setTerminalOffline } from '@/services/terminalService';
+import { fetchTerminals, setTerminalOnline, setTerminalOffline, claimTerminal } from '@/services/terminalService';
 import { saveTerminal, loadTerminal, clearTerminal } from '@/services/storageService';
+import { getDeviceId } from '@/services/deviceService';
 import { HEARTBEAT_INTERVAL_MS } from '@/constants/config';
 
 const MAX_ATTEMPTS = 3;
@@ -150,7 +151,8 @@ export function useSetup(): [SetupState, SetupActions] {
       setConfirming(true);
       try {
         await saveTerminal(selectedTerminal.id, selectedTerminal.orientation, selectedTerminal.name);
-        await setTerminalOnline(selectedTerminal.id);
+        const deviceId = await getDeviceId();
+        await claimTerminal(selectedTerminal.id, deviceId);
         heartbeatTerminalRef.current = selectedTerminal.id;
         setSavedTerminalId(selectedTerminal.id);
       } catch (err: any) {
@@ -184,7 +186,8 @@ export function useSetup(): [SetupState, SetupActions] {
     setConfirming(true);
     try {
       await saveTerminal(selectedTerminal.id, selectedTerminal.orientation, selectedTerminal.name);
-      await setTerminalOnline(selectedTerminal.id);
+      const deviceId = await getDeviceId();
+      await claimTerminal(selectedTerminal.id, deviceId);
       heartbeatTerminalRef.current = selectedTerminal.id;
       setSavedTerminalId(selectedTerminal.id);
     } catch (err: any) {

@@ -3,11 +3,14 @@ import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 import expo.modules.ReactActivityDelegateWrapper
 
@@ -61,5 +64,41 @@ class MainActivity : ReactActivity() {
       // Use the default back button implementation on Android S
       // because it's doing more than [Activity.moveTaskToBack] in fact.
       super.invokeDefaultOnBackPressed()
+  }
+
+  // ─── Ponte de teclas do controle remoto (D-pad) pro JS ────────────────────
+  // Boxes Android genéricas (não Android TV/Leanback) mapeiam o controle
+  // físico pra eventos de tecla padrão do Android (KEYCODE_DPAD_*). O React
+  // Native puro não expõe isso nem faz o Pressable ser focável nativamente,
+  // então repassamos manualmente via DeviceEventEmitter — a navegação em si
+  // (qual item está em foco, mover com as setas, "clicar" com OK) é
+  // implementada em JS (ver hooks/useDpadNavigation.ts).
+  private val DPAD_EVENT_NAME = "IronScreensDpadEvent"
+
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (event.action == KeyEvent.ACTION_DOWN) {
+      val keyName = when (event.keyCode) {
+        KeyEvent.KEYCODE_DPAD_UP -> "UP"
+        KeyEvent.KEYCODE_DPAD_DOWN -> "DOWN"
+        KeyEvent.KEYCODE_DPAD_LEFT -> "LEFT"
+        KeyEvent.KEYCODE_DPAD_RIGHT -> "RIGHT"
+        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> "SELECT"
+        else -> null
+      }
+      if (keyName != null) emitDpadEvent(keyName)
+    }
+    return super.dispatchKeyEvent(event)
+  }
+
+  private fun emitDpadEvent(keyName: String) {
+    try {
+      val reactContext = reactHost?.currentReactContext ?: return
+      val params = Arguments.createMap().apply { putString("key", keyName) }
+      reactContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit(DPAD_EVENT_NAME, params)
+    } catch (e: Exception) {
+      // Bridge/JS ainda não pronto (ex: durante o boot) — ignora silenciosamente.
+    }
   }
 }

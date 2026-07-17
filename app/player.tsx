@@ -13,7 +13,8 @@ import {
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useKeepAwake } from "@/hooks/useKeepAwake";
-import { loadTerminal, clearTerminal } from "@/services/storageService";
+import { loadTerminal, saveTerminal, clearTerminal } from "@/services/storageService";
+import { fetchTerminalById } from "@/services/terminalService";
 import { usePlayer } from "@/hooks/usePlayer";
 import { useFooterBar } from "@/hooks/useFooterBar";
 import { useRemoteCommands } from "@/hooks/useRemoteCommands";
@@ -199,9 +200,32 @@ export default function PlayerScreen() {
       }
 
       setTerminalId(tid);
-      const resolvedOrientation = orientation || "horizontal";
+
+      // ─── A orientação cacheada localmente só reflete o que era verdade no
+      // momento do setup. Se o admin mudou a orientação do terminal depois
+      // (ou o setup foi feito antes dessa mudança), o box ficava preso na
+      // orientação antiga pra sempre. Busca a configuração atual do sistema
+      // antes de aplicar; cai pro cache local só se estiver offline.
+      let resolvedOrientation = orientation || "horizontal";
+      let resolvedName = name;
+      try {
+        const remote = await fetchTerminalById(tid);
+        if (remote) {
+          resolvedOrientation = remote.orientation || resolvedOrientation;
+          resolvedName = remote.name || resolvedName;
+          if (
+            remote.orientation !== orientation ||
+            remote.name !== name
+          ) {
+            await saveTerminal(tid, resolvedOrientation, resolvedName || "");
+          }
+        }
+      } catch {
+        // offline no boot: segue com o que tem em cache local
+      }
+
       setTerminalOrientation(resolvedOrientation);
-      setTerminalName(name);
+      setTerminalName(resolvedName);
       await applyOrientation(resolvedOrientation);
       setReady(true);
     }
@@ -228,7 +252,18 @@ export default function PlayerScreen() {
     isConnected,
     hybridSlot1Item,
     hybridSlot2Item,
+    isKicked,
   } = playerState;
+
+  // ─── Outro aparelho reivindicou este terminal (mesmo PIN usado em 2 telas).
+  // Em vez de continuar brigando por heartbeats/comandos, volta pro setup.
+  useEffect(() => {
+    if (!isKicked) return;
+    (async () => {
+      await clearTerminal();
+      router.replace("/setup");
+    })();
+  }, [isKicked, router]);
 
   // ─── FIX: lastItemRef mantido apenas como fallback para o primeiro frame
   // de carregamento (antes de qualquer item chegar). Após isso, currentItem

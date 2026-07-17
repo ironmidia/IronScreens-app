@@ -19,6 +19,8 @@ import { Image } from 'expo-image';
 import { useSetup } from '@/hooks/useSetup';
 import { Terminal } from '@/services/models';
 import { Colors, Typography, Spacing, Radius } from '@/constants/theme';
+import { useDpadGridFocus } from '@/hooks/useDpadGridFocus';
+import DpadKeyboard from '@/components/setup/DpadKeyboard';
 
 const { width } = Dimensions.get('window');
 
@@ -47,10 +49,27 @@ export default function SetupScreen() {
     prevConfirming.current = state.confirming;
   }, [state.confirming, state.error, state.savedTerminalId, router]);
 
+  // ─── Navegação por controle remoto (D-pad) na lista de terminais ─────────
+  // Cada terminal é uma "linha" de 1 coluna só; OK seleciona o terminal em
+  // foco. Só fica ativo no passo de seleção (a tela de PIN tem seu próprio
+  // teclado navegável — ver DpadKeyboard).
+  const terminalListLayout = state.terminals.map(() => 1);
+  const { row: terminalFocusRow, isFocused: isTerminalFocused } = useDpadGridFocus(
+    terminalListLayout,
+    (row) => {
+      const terminal = state.terminals[row];
+      if (terminal) actions.selectTerminal(terminal);
+    },
+    state.step === 'select' && !state.loading && state.terminals.length > 0,
+  );
+
   const renderTerminalItem = useCallback(
-    ({ item }: { item: Terminal }) => (
+    ({ item, index }: { item: Terminal; index: number }) => (
       <Pressable
-        style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+        style={({ pressed }) => [
+          styles.card,
+          (pressed || isTerminalFocused(index, 0)) && styles.cardPressed,
+        ]}
         onPress={() => actions.selectTerminal(item)}
       >
         <View style={styles.cardLeft}>
@@ -77,7 +96,7 @@ export default function SetupScreen() {
         </View>
       </Pressable>
     ),
-    [actions]
+    [actions, isTerminalFocused]
   );
 
   // ─── STEP: SELECT TERMINAL ───
@@ -124,6 +143,7 @@ export default function SetupScreen() {
           data={state.terminals}
           keyExtractor={(item) => item.id}
           renderItem={renderTerminalItem}
+          extraData={terminalFocusRow}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -135,16 +155,14 @@ export default function SetupScreen() {
   // ─── STEP: ENTER PIN ───
   const renderPinStep = () => {
     const t = state.selectedTerminal!;
+    const confirmDisabled =
+      state.lockedOut || state.confirming || state.pinValue.length !== 5;
+
     return (
       <KeyboardAvoidingView
         style={styles.pinWrapper}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <Pressable style={styles.backBtn} onPress={actions.backToSelect}>
-          <MaterialIcons name="arrow-back" size={20} color={Colors.TextMuted} />
-          <Text style={styles.backBtnText}>Voltar</Text>
-        </Pressable>
-
         <View style={styles.pinCard}>
           <View style={styles.pinTerminalRow}>
             <View style={styles.iconBox}>
@@ -166,7 +184,8 @@ export default function SetupScreen() {
 
           <Text style={styles.pinLabel}>PIN de Acesso</Text>
           <Text style={styles.pinHint}>
-            Digite o PIN de 5 dígitos gerado no sistema Iron Screens
+            Digite o PIN de 5 dígitos gerado no sistema Iron Screens — use as
+            setas do controle e OK, ou toque no teclado abaixo
           </Text>
 
           <TextInput
@@ -185,7 +204,7 @@ export default function SetupScreen() {
             autoCorrect={false}
             keyboardType="default"
             editable={!state.lockedOut && !state.confirming}
-            autoFocus
+            showSoftInputOnFocus={false}
           />
 
           {state.lockedOut ? (
@@ -202,21 +221,16 @@ export default function SetupScreen() {
             </View>
           ) : null}
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.confirmBtn,
-              (state.lockedOut || state.confirming || state.pinValue.length !== 5) && styles.confirmBtnDisabled,
-              pressed && !state.lockedOut && styles.confirmBtnPressed,
-            ]}
-            onPress={actions.confirmPin}
-            disabled={state.lockedOut || state.confirming || state.pinValue.length !== 5}
-          >
-            {state.confirming ? (
-              <ActivityIndicator color={Colors.TextPrimary} size="small" />
-            ) : (
-              <Text style={styles.confirmBtnText}>Confirmar</Text>
-            )}
-          </Pressable>
+          <DpadKeyboard
+            value={state.pinValue}
+            maxLength={5}
+            onChangeValue={actions.onPinChange}
+            onConfirm={actions.confirmPin}
+            onBack={actions.backToSelect}
+            confirmDisabled={confirmDisabled}
+            confirming={state.confirming}
+            enabled={state.step === 'pin' && !state.lockedOut}
+          />
         </View>
       </KeyboardAvoidingView>
     );

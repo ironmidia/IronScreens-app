@@ -14,4 +14,5 @@ export const STORAGE_KEYS = {
   TERMINAL_NAME: 'iron_screens_terminal_name',
   GROUP_INDICES: 'iron_screens_group_indices',
   PLAYLIST_CACHE: (terminalId: string) => `iron_screens_playlist_cache_${terminalId}`,
+  DEVICE_ID: 'iron_screens_device_id',
 };

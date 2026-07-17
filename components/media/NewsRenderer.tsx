@@ -1,6 +1,6 @@
 // Iron Screens — News Renderer (playlist item flagged as a news article)
 import React, { memo, useState } from 'react';
-import { Image as RNImage, StyleSheet, Text, View } from 'react-native';
+import { Image as RNImage, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 
 const NEWS_CATEGORY_PREFIX = 'Notícias - ';
@@ -39,22 +39,48 @@ export function newsCategoryLabel(category: string | null | undefined): string {
 
 function NewsRenderer({ imageUrl, title, category }: NewsRendererProps) {
   const [imageFailed, setImageFailed] = useState(false);
+  const { width, height } = useWindowDimensions();
+  const isPortrait = height > width;
   const categoryLabel = newsCategoryLabel(category);
   const themeColor = CATEGORY_THEME[categoryLabel] ?? DEFAULT_THEME_COLOR;
   const showImage = !!imageUrl && !imageFailed;
 
+  const image = showImage ? (
+    <Image
+      source={{ uri: imageUrl! }}
+      style={StyleSheet.absoluteFillObject}
+      contentFit="cover"
+      transition={0}
+      cachePolicy="memory-disk"
+      onError={() => setImageFailed(true)}
+    />
+  ) : null;
+
+  // ─── Terminal vertical: foto em cima, card branco com o título embaixo.
+  if (isPortrait) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.verticalImageWrap}>{image}</View>
+
+        <View style={styles.verticalCard}>
+          <Text
+            style={styles.verticalHeadline}
+            numberOfLines={6}
+            adjustsFontSizeToFit
+            minimumFontScale={0.55}
+          >
+            {title}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // ─── Terminal horizontal: faixa inferior com logo/categoria à esquerda e
+  // título sobre a cor do tema à direita.
   return (
     <View style={styles.container}>
-      {showImage && (
-        <Image
-          source={{ uri: imageUrl! }}
-          style={StyleSheet.absoluteFillObject}
-          contentFit="cover"
-          transition={0}
-          cachePolicy="memory-disk"
-          onError={() => setImageFailed(true)}
-        />
-      )}
+      {image}
 
       <View style={styles.bottomBar}>
         <View style={styles.leftPanel}>
@@ -88,6 +114,27 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  verticalImageWrap: {
+    flex: 0.62,
+    backgroundColor: '#111',
+  },
+  verticalCard: {
+    flex: 0.38,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    marginTop: -24,
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    justifyContent: 'center',
+  },
+  verticalHeadline: {
+    fontFamily: 'Arial',
+    fontWeight: '800',
+    fontSize: 32,
+    lineHeight: 38,
+    color: '#111111',
   },
   bottomBar: {
     position: 'absolute',

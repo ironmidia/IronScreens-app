@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { Alert, AppState, Platform } from "react-native";
 import { supabase } from "@/services/supabase";
 import { clearPendingCommand, saveScreenshotUrl } from "@/services/terminalService";
+import { getDeviceId } from "@/services/deviceService";
 
 // ─── Fallback de confiabilidade: o Android às vezes mata/suspende o socket de
 // Realtime em segundo plano, fazendo o app perder o evento do comando. Sem
@@ -35,6 +36,11 @@ export function useRemoteCommands({
       console.log("[RemoteCmd] terminalId ainda não disponível, aguardando...");
       return;
     }
+
+    let localDeviceId: string | null = null;
+    getDeviceId().then((id) => {
+      localDeviceId = id;
+    });
 
     const runCommand = async (cmd: string) => {
       console.log("[RemoteCmd] Executando comando:", cmd);
@@ -113,8 +119,23 @@ export function useRemoteCommands({
       }
     };
 
-    const handleIncomingCommand = async (cmd: string | null) => {
+    const handleIncomingCommand = async (
+      cmd: string | null,
+      rowDeviceId: string | null,
+    ) => {
       if (!cmd) return;
+
+      // ─── Dois aparelhos podem ter sido configurados com o mesmo terminal
+      // (mesmo PIN). Ambos escutam a mesma linha, então sem essa checagem os
+      // dois executam o comando ao mesmo tempo — inclusive o aparelho que já
+      // estava tocando normalmente, travando sua reprodução. Só o dono atual
+      // (device_id gravado no último claim) processa o comando.
+      if (rowDeviceId && localDeviceId && rowDeviceId !== localDeviceId) {
+        console.log(
+          "[RemoteCmd] Ignorando comando — este aparelho não é mais o dono do terminal",
+        );
+        return;
+      }
 
       console.log("[RemoteCmd] Comando recebido:", cmd);
 
@@ -140,7 +161,10 @@ export function useRemoteCommands({
         },
         (payload) => {
           const newRow = payload.new as any;
-          void handleIncomingCommand(newRow?.pending_command ?? null);
+          void handleIncomingCommand(
+            newRow?.pending_command ?? null,
+            newRow?.device_id ?? null,
+          );
         },
       )
       .subscribe((status) => {
@@ -155,10 +179,13 @@ export function useRemoteCommands({
       try {
         const { data } = await supabase
           .from("terminals")
-          .select("pending_command")
+          .select("pending_command, device_id")
           .eq("id", terminalId)
           .maybeSingle();
-        await handleIncomingCommand(data?.pending_command ?? null);
+        await handleIncomingCommand(
+          data?.pending_command ?? null,
+          (data as any)?.device_id ?? null,
+        );
       } catch (e) {
         console.error("[RemoteCmd] Erro ao checar comando pendente:", e);
       } finally {
