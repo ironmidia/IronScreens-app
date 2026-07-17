@@ -18,6 +18,11 @@ const CATEGORY_THEME: Record<string, string> = {
 };
 const DEFAULT_THEME_COLOR = '#16A34A';
 
+// Texto exibido na tela pode diferir do nome cru da categoria.
+const CATEGORY_DISPLAY_LABEL: Record<string, string> = {
+  Geral: 'Notícias Gerais',
+};
+
 interface NewsRendererProps {
   imageUrl: string | null;
   backgroundUrl: string | null;
@@ -42,6 +47,7 @@ function NewsRenderer({ imageUrl, title, category }: NewsRendererProps) {
   const { width, height } = useWindowDimensions();
   const isPortrait = height > width;
   const categoryLabel = newsCategoryLabel(category);
+  const categoryDisplayLabel = CATEGORY_DISPLAY_LABEL[categoryLabel] ?? categoryLabel;
   const themeColor = CATEGORY_THEME[categoryLabel] ?? DEFAULT_THEME_COLOR;
   const showImage = !!imageUrl && !imageFailed;
 
@@ -56,18 +62,32 @@ function NewsRenderer({ imageUrl, title, category }: NewsRendererProps) {
     />
   ) : null;
 
-  // ─── Terminal vertical: foto em cima, card branco com o título embaixo.
+  // ─── Terminal vertical: mesma estrutura do horizontal, só que empilhada —
+  // foto em cima, faixa branca com logo + categoria no meio, faixa colorida
+  // com o título embaixo.
   if (isPortrait) {
     return (
       <View style={styles.container}>
         <View style={styles.verticalImageWrap}>{image}</View>
 
-        <View style={styles.verticalCard}>
+        <View style={styles.topBar}>
+          <RNImage source={logoSource} style={styles.logoVertical} resizeMode="contain" />
           <Text
-            style={styles.verticalHeadline}
-            numberOfLines={6}
+            style={[styles.categoryTextVertical, { color: themeColor }]}
+            numberOfLines={1}
             adjustsFontSizeToFit
-            minimumFontScale={0.55}
+            minimumFontScale={0.5}
+          >
+            {categoryDisplayLabel.toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={[styles.bottomStripVertical, { backgroundColor: themeColor }]}>
+          <Text
+            style={styles.titleTextVertical}
+            numberOfLines={4}
+            adjustsFontSizeToFit
+            minimumFontScale={0.5}
           >
             {title}
           </Text>
@@ -91,7 +111,7 @@ function NewsRenderer({ imageUrl, title, category }: NewsRendererProps) {
             adjustsFontSizeToFit
             minimumFontScale={0.4}
           >
-            {categoryLabel.toUpperCase()}
+            {categoryDisplayLabel.toUpperCase()}
           </Text>
         </View>
 
@@ -115,26 +135,41 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
+  topBar: {
+    height: '8%',
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: '5%',
+    gap: 12,
+  },
+  logoVertical: {
+    width: '30%',
+    height: '55%',
+  },
+  categoryTextVertical: {
+    flex: 1,
+    fontFamily: 'Arial',
+    fontWeight: '900',
+    fontSize: 24,
+    letterSpacing: 0.3,
+  },
   verticalImageWrap: {
-    flex: 0.62,
+    flex: 1,
     backgroundColor: '#111',
   },
-  verticalCard: {
-    flex: 0.38,
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    marginTop: -24,
-    paddingHorizontal: 24,
-    paddingVertical: 24,
+  bottomStripVertical: {
+    minHeight: '20%',
     justifyContent: 'center',
+    paddingHorizontal: '6%',
+    paddingVertical: 18,
   },
-  verticalHeadline: {
+  titleTextVertical: {
     fontFamily: 'Arial',
     fontWeight: '800',
-    fontSize: 32,
-    lineHeight: 38,
-    color: '#111111',
+    fontSize: 28,
+    lineHeight: 34,
+    color: '#fff',
   },
   bottomBar: {
     position: 'absolute',
