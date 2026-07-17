@@ -334,7 +334,10 @@ export default function PlayerScreen() {
         setMenuVisible(false);
         return true;
       }
-      return true;
+      // ─── Não consome o evento aqui: deixa propagar pro handler em
+      // app/_layout.tsx, que implementa o "aperte 2x pra voltar ao seletor
+      // de terminais". Retornar true sempre travava esse fluxo por completo.
+      return false;
     });
 
     return () => sub.remove();

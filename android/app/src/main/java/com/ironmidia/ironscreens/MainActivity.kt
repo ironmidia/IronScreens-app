@@ -1,6 +1,7 @@
 package com.ironmidia.ironscreens
 import expo.modules.splashscreen.SplashScreenManager
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -64,6 +65,28 @@ class MainActivity : ReactActivity() {
       // Use the default back button implementation on Android S
       // because it's doing more than [Activity.moveTaskToBack] in fact.
       super.invokeDefaultOnBackPressed()
+  }
+
+  // ─── Modo quiosque "melhor esforço" (sem Device Owner) ─────────────────────
+  // Sem provisionar a caixa como Device Owner (exige ADB numa caixa zerada),
+  // não dá pra bloquear Home/Recentes de verdade — o Android reserva essas
+  // teclas pro sistema antes mesmo de chegar no app. O paliativo possível:
+  // onUserLeaveHint() é chamado bem antes da Activity ir pra segundo plano
+  // por causa do usuário apertar Home/Recentes/trocar de app — nesse
+  // instante relançamos a própria Activity por cima. Não impede o usuário
+  // de ver a tela de Recentes/Home por uma fração de segundo, mas traz o
+  // app de volta imediatamente em vez de deixar ele "escapar".
+  // O botão Voltar físico NÃO passa por aqui (fica só no BackHandler do JS).
+  override fun onUserLeaveHint() {
+    super.onUserLeaveHint()
+    try {
+      val intent = Intent(this, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      startActivity(intent)
+    } catch (e: Exception) {
+      // Ignora silenciosamente — pior caso é o usuário conseguir sair uma vez.
+    }
   }
 
   // ─── Ponte de teclas do controle remoto (D-pad) pro JS ────────────────────
