@@ -10,7 +10,10 @@ import { getDeviceId } from "@/services/deviceService";
 // isso, o comando só some depois que o admin limpa automaticamente (5min) sem
 // nunca ter sido executado. O polling + a checagem ao voltar de background
 // garantem que o comando seja pego mesmo se o Realtime tiver perdido o evento.
-const COMMAND_POLL_INTERVAL_MS = 30_000;
+// O caminho rápido (Realtime, já filtrado por terminal) cobre o caso comum;
+// esse polling é só uma rede de segurança, por isso não precisa ser tão
+// frequente — reduz o consumo de SELECTs rodando 24/7 em cada terminal.
+const COMMAND_POLL_INTERVAL_MS = 120_000;
 
 type UseRemoteCommandsOptions = {
   terminalId: string | null;

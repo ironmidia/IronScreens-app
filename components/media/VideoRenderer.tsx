@@ -6,6 +6,16 @@ interface VideoRendererProps {
   uri: string;
   durationSec?: number;
   onEnd?: () => void;
+  /**
+   * true quando a tela está sendo girada via RotatedViewport (terminal
+   * vertical/híbrido numa box que não gira o HDMI de verdade). O SurfaceView
+   * padrão do Android (usado pelo expo-video) desenha o vídeo direto via
+   * compositor de hardware, ignorando qualquer transform de rotação da
+   * árvore de views — por isso o vídeo aparecia deitado mesmo com o resto
+   * da tela girando certinho. TextureView participa do pipeline normal de
+   * renderização e respeita a rotação, ao custo de um pouco mais de energia.
+   */
+  rotated?: boolean;
 }
 
 const IDLE_RECOVERY_DELAY_MS = 900;
@@ -24,7 +34,7 @@ function getSafetyWatchdogMs(realDurationSec?: number) {
   return 120000;
 }
 
-function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
+function VideoRenderer({ uri, durationSec, onEnd, rotated }: VideoRendererProps) {
   const onEndRef = useRef(onEnd);
   const endCalledRef = useRef(false);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -220,14 +230,18 @@ function VideoRenderer({ uri, durationSec, onEnd }: VideoRendererProps) {
         contentFit="cover"
         nativeControls={false}
         fullscreenOptions={{ enable: false }}
+        surfaceType={rotated ? "textureView" : "surfaceView"}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
-  video: { flex: 1, backgroundColor: "#000" },
+  // ─── Transparente (não preto) pra deixar o backdrop de transição do
+  // player (app/player.tsx) aparecer enquanto o vídeo ainda carrega o
+  // primeiro frame, em vez de mostrar um flash de tela preta.
+  container: { flex: 1, backgroundColor: "transparent" },
+  video: { flex: 1, backgroundColor: "transparent" },
 });
 
 export default memo(VideoRenderer);

@@ -5,6 +5,7 @@ import { Media } from "@/services/models";
 import { extractYouTubeId } from "@/services/youtubeService";
 import ImageRenderer from "./ImageRenderer";
 import VideoRenderer from "./VideoRenderer";
+import WebVideoRenderer from "./WebVideoRenderer.native";
 import YoutubeRenderer from "./YoutubeRenderer.native";
 import WebViewRenderer from "./WebViewRenderer.native";
 import NewsRenderer, { isNewsMedia } from "./NewsRenderer";
@@ -14,6 +15,7 @@ interface MediaRendererProps {
   durationSec?: number;
   transitionImageUrl?: string | null;
   onVideoEnd?: () => void;
+  rotated?: boolean;
 }
 
 function MediaRenderer({
@@ -21,6 +23,7 @@ function MediaRenderer({
   durationSec,
   transitionImageUrl,
   onVideoEnd,
+  rotated,
 }: MediaRendererProps) {
   const resolvedUri = media.local_file_url || media.file_url || null;
 
@@ -43,11 +46,26 @@ function MediaRenderer({
 
     case "video":
       if (!resolvedUri) return <View style={styles.black} />;
+      // ─── Vídeos próprios (upload no sistema) via expo-video não respeitam
+      // a rotação simulada nesse hardware, mesmo com surfaceType=textureView
+      // — mas o WebView (usado pro YouTube/Instagram) respeita certinho.
+      // Só troca pra esse caminho quando a rotação simulada está ativa;
+      // fora disso mantém o player nativo (mais leve/eficiente).
+      if (rotated) {
+        return (
+          <WebVideoRenderer
+            uri={resolvedUri}
+            durationSec={durationSec}
+            onEnd={onVideoEnd}
+          />
+        );
+      }
       return (
         <VideoRenderer
           uri={resolvedUri}
           durationSec={durationSec}
           onEnd={onVideoEnd}
+          rotated={rotated}
         />
       );
 
@@ -70,7 +88,9 @@ function MediaRenderer({
 }
 
 const styles = StyleSheet.create({
-  black: { flex: 1, backgroundColor: "#000" },
+  // Transparente pra deixar o backdrop de transição do player aparecer
+  // em vez de tela preta quando não há mídia válida pra mostrar.
+  black: { flex: 1, backgroundColor: "transparent" },
 });
 
 export default memo(MediaRenderer);

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as Network from "expo-network";
-import { PlaybackItem, Media, MediaGroupItem } from "@/services/models";
+import { PlaybackItem, Media, MediaGroup, MediaGroupItem } from "@/services/models";
 import {
   fetchPlaylistItems,
   fetchAllMediaForPlaylist,
@@ -136,6 +136,12 @@ export function usePlayer(
   const [isOfflineCache, setIsOfflineCache] = useState(false);
   const [isKicked, setIsKicked] = useState(false);
   const localDeviceIdRef = useRef<string | null>(null);
+  // ─── ID da playlist ativa, usado só pra filtrar a inscrição realtime de
+  // playlist_items (ver mais abaixo) — evita reagir a edições de playlists
+  // de OUTROS terminais.
+  const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  const activePlaylistIdRef = useRef<string | null>(null);
+  const heartbeatTickRef = useRef(0);
 
   // ─── FIX: currentItem agora é estado gerenciado, não calculado inline no render.
   // Isso garante que nunca haja um frame com null entre dois itens válidos.
@@ -155,6 +161,16 @@ export function usePlayer(
   const groupIndicesRef = useRef<Record<string, number>>({});
   const groupMetaRef = useRef<
     Record<string, { validItems: MediaGroupItem[]; rotationMode: string }>
+  >({});
+  // ─── Cache de grupos de mídia: sem isso, TODA reconstrução de playlist
+  // (poll, realtime, recuperação de offline, reload manual) refazia as
+  // consultas de grupo+itens do zero pra cada grupo presente na playlist,
+  // mesmo quando nada mudou. Isso multiplicava muito o consumo de SELECTs
+  // numa frota com várias TV boxes rodando 24/7. Reaproveita o resultado
+  // por alguns minutos antes de buscar de novo.
+  const GROUP_CACHE_TTL_MS = 15 * 60 * 1000;
+  const groupRawCacheRef = useRef<
+    Record<string, { group: MediaGroup; groupItems: MediaGroupItem[]; fetchedAt: number }>
   >({});
   const playlistRef = useRef<PlaybackItem[]>([]);
   const currentIndexRef = useRef(0);
@@ -197,6 +213,14 @@ export function usePlayer(
   const buildPlaylist = useCallback(async (): Promise<PlaybackItem[]> => {
     const rawItems = await fetchPlaylistItems(terminalId);
 
+    if (rawItems.length) {
+      const pid = rawItems[0].playlist_id;
+      if (pid && pid !== activePlaylistIdRef.current) {
+        activePlaylistIdRef.current = pid;
+        setActivePlaylistId(pid);
+      }
+    }
+
     if (!rawItems.length) {
       console.log("[Player] Nenhum item de playlist para o terminal:", terminalId);
       return [];
@@ -237,10 +261,24 @@ export function usePlayer(
       }
 
       if (item.item_type === "group" && item.group_id) {
-        const [group, groupItems] = await Promise.all([
-          fetchMediaGroup(item.group_id),
-          fetchMediaGroupItems(item.group_id),
-        ]);
+        const cached = groupRawCacheRef.current[item.group_id];
+        const isCacheFresh = !!cached && Date.now() - cached.fetchedAt < GROUP_CACHE_TTL_MS;
+
+        let group: MediaGroup | null;
+        let groupItems: MediaGroupItem[];
+
+        if (isCacheFresh) {
+          group = cached.group;
+          groupItems = cached.groupItems;
+        } else {
+          [group, groupItems] = await Promise.all([
+            fetchMediaGroup(item.group_id),
+            fetchMediaGroupItems(item.group_id),
+          ]);
+          if (group) {
+            groupRawCacheRef.current[item.group_id] = { group, groupItems, fetchedAt: Date.now() };
+          }
+        }
 
         if (!group || !groupItems.length) continue;
 
@@ -437,6 +475,12 @@ export function usePlayer(
     getDeviceId().then((id) => { localDeviceIdRef.current = id; });
   }, []);
 
+  // ─── A checagem de posse (fetchTerminalOwnerDeviceId) é um SELECT extra
+  // rodando pra sempre, 24/7, em cada terminal da frota. Detectar um
+  // conflito de PIN alguns minutos mais tarde não faz diferença prática,
+  // então só checa a cada N batidas de heartbeat em vez de toda vez.
+  const OWNERSHIP_CHECK_EVERY_N_TICKS = 5;
+
   useEffect(() => {
     const heartbeat = setInterval(async () => {
       try {
@@ -444,11 +488,15 @@ export function usePlayer(
         setIsConnected(true);
         if (isOfflineCache) loadPlaylist();
 
+        heartbeatTickRef.current += 1;
+        const shouldCheckOwnership =
+          heartbeatTickRef.current % OWNERSHIP_CHECK_EVERY_N_TICKS === 0;
+
         // ─── Detecta se outro aparelho reivindicou este terminal (mesmo PIN
         // usado em duas telas). Sem isso os dois ficam brigando pelos mesmos
         // comandos remotos e heartbeats, travando a reprodução de ambos.
         const localId = localDeviceIdRef.current;
-        if (localId) {
+        if (localId && shouldCheckOwnership) {
           const ownerId = await fetchTerminalOwnerDeviceId(terminalId);
           if (ownerId && ownerId !== localId) {
             setIsKicked(true);
@@ -466,15 +514,33 @@ export function usePlayer(
     return () => clearInterval(poll);
   }, [loadPlaylist]);
 
+  // ─── Só se inscreve quando já sabemos o ID da playlist ativa (após o
+  // primeiro load), e SÓ escuta playlist_items filtrado por essa playlist
+  // específica. Antes, as três inscrições (playlist_items/media/
+  // media_group_items) não tinham NENHUM filtro — qualquer edição de mídia
+  // ou grupo em QUALQUER playlist de QUALQUER terminal disparava reload em
+  // TODOS os terminais da frota simultaneamente. Mudanças em media/
+  // media_group_items agora só chegam pelo poll periódico
+  // (PLAYLIST_POLL_INTERVAL_MS) — menos imediato, mas evita que uma edição
+  // não relacionada gere uma tempestade de recarregamentos fleet-wide.
   useEffect(() => {
+    if (!activePlaylistId) return;
+
     const channel = supabase
-      .channel(`terminal_${terminalId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "playlist_items" }, () => loadPlaylist())
-      .on("postgres_changes", { event: "*", schema: "public", table: "media" }, () => loadPlaylist())
-      .on("postgres_changes", { event: "*", schema: "public", table: "media_group_items" }, () => loadPlaylist())
+      .channel(`terminal_${terminalId}_playlist_${activePlaylistId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "playlist_items",
+          filter: `playlist_id=eq.${activePlaylistId}`,
+        },
+        () => loadPlaylist(),
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [terminalId, loadPlaylist]);
+  }, [terminalId, activePlaylistId, loadPlaylist]);
 
   useEffect(() => {
     return () => { setTerminalOffline(terminalId).catch(() => {}); };
@@ -540,7 +606,39 @@ export function usePlayer(
     setCurrentItem(nextItem);
     setCurrentIndex(nextIndex);
     setCycleTick((t) => t + 1);
+
+    // ─── Se NENHUM item da lista está agendado neste instante (ex: só
+    // restava conteúdo com horário/dia específico e a janela fechou), sem
+    // isso o player ficava travado pra sempre: currentItem virava null, o
+    // timer de avanço (que depende de currentItem) parava de rearmar, e a
+    // tela ficava presa no último frame exibido (fallback em app/player.tsx)
+    // sem nenhuma chance de sair desse estado. Agora avisa a UI (mostra
+    // EmptyScreen em vez de congelar) e liga um retry pra retomar sozinho
+    // assim que algum item voltar a estar dentro do horário agendado.
+    setHasNoScheduledMedia(!nextItem);
   }, [terminalId]);
+
+  // ─── Retry de recuperação: enquanto não houver nenhum item agendado no
+  // momento, tenta resolver de novo periodicamente (ex: agendamento por
+  // horário que ainda vai abrir). Assim que achar algo, retoma a reprodução
+  // sozinho, sem precisar de reload manual/remoto.
+  useEffect(() => {
+    if (terminalOrientation === "hybrid") return;
+    if (currentItem) return;
+    if (!playlist.length) return;
+
+    const RECOVERY_RETRY_MS = 15_000;
+    const retry = setInterval(() => {
+      const list = playlistRef.current;
+      const resolved = resolveItem(list, currentIndexRef.current);
+      if (resolved) {
+        setCurrentItem(resolved);
+        setHasNoScheduledMedia(false);
+      }
+    }, RECOVERY_RETRY_MS);
+
+    return () => clearInterval(retry);
+  }, [currentItem, playlist.length, terminalOrientation]);
 
   const advanceSlot1 = useCallback(() => {
     const list = slot1Ref.current;

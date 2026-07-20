@@ -1,5 +1,5 @@
 // Iron Screens — Terminal Setup Screen (v2: PIN validation)
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { useSetup } from '@/hooks/useSetup';
 import { Terminal } from '@/services/models';
 import { Colors, Typography, Spacing, Radius } from '@/constants/theme';
 import { useDpadGridFocus } from '@/hooks/useDpadGridFocus';
+import { getSimulateRotation, setSimulateRotation } from '@/services/storageService';
 
 const { width } = Dimensions.get('window');
 
@@ -48,18 +49,44 @@ export default function SetupScreen() {
     prevConfirming.current = state.confirming;
   }, [state.confirming, state.error, state.savedTerminalId, router]);
 
+  // ─── Rotação simulada — TV boxes sem tela touch não conseguem abrir o menu
+  // oculto (toque longo), então essa opção precisa estar acessível só com o
+  // controle remoto, aqui na tela de configuração inicial.
+  const [simulateRotation, setSimulateRotationValue] = useState(false);
+  useEffect(() => {
+    getSimulateRotation().then(setSimulateRotationValue);
+  }, []);
+
+  const handleToggleSimulateRotation = useCallback(() => {
+    setSimulateRotationValue((prev) => {
+      const next = !prev;
+      setSimulateRotation(next).catch(() => {});
+      return next;
+    });
+  }, []);
+
   // ─── Navegação por controle remoto (D-pad) na lista de terminais ─────────
-  // Cada terminal é uma "linha" de 1 coluna só; OK seleciona o terminal em
-  // foco. Só fica ativo no passo de seleção — a tela de PIN usa o teclado
-  // nativo do Android (o teclado próprio ficava grande demais na TV).
-  const terminalListLayout = state.terminals.map(() => 1);
-  const { row: terminalFocusRow, isFocused: isTerminalFocused } = useDpadGridFocus(
+  // Linha 0 = toggle de rotação simulada; linhas seguintes = terminais (1
+  // coluna cada). OK seleciona o terminal em foco ou alterna o toggle. Só
+  // fica ativo no passo de seleção — a tela de PIN usa o teclado nativo do
+  // Android (o teclado próprio ficava grande demais na TV).
+  const terminalListLayout = [1, ...state.terminals.map(() => 1)];
+  const { row: selectFocusRow, isFocused: isSelectFocused } = useDpadGridFocus(
     terminalListLayout,
     (row) => {
-      const terminal = state.terminals[row];
+      if (row === 0) {
+        handleToggleSimulateRotation();
+        return;
+      }
+      const terminal = state.terminals[row - 1];
       if (terminal) actions.selectTerminal(terminal);
     },
-    state.step === 'select' && !state.loading && state.terminals.length > 0,
+    state.step === 'select' && !state.loading,
+  );
+  const isRotationToggleFocused = isSelectFocused(0, 0);
+  const isTerminalFocused = useCallback(
+    (index: number, col: number) => isSelectFocused(index + 1, col),
+    [isSelectFocused],
   );
 
   const renderTerminalItem = useCallback(
@@ -110,6 +137,28 @@ export default function SetupScreen() {
         <Text style={styles.headerSubtitle}>Selecione o terminal deste dispositivo</Text>
       </View>
 
+      <Pressable
+        style={[styles.rotationToggle, isRotationToggleFocused && styles.rotationToggleFocused]}
+        onPress={handleToggleSimulateRotation}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rotationToggleLabel}>Rotação simulada</Text>
+          <Text style={styles.rotationToggleHint}>
+            Ative só se esta caixa não gira a tela sozinha
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.rotationToggleSwitch,
+            simulateRotation && styles.rotationToggleSwitchOn,
+          ]}
+        >
+          <Text style={styles.rotationToggleSwitchText}>
+            {simulateRotation ? 'LIGADO' : 'DESLIGADO'}
+          </Text>
+        </View>
+      </Pressable>
+
       {state.loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Colors.Primary} />
@@ -142,7 +191,7 @@ export default function SetupScreen() {
           data={state.terminals}
           keyExtractor={(item) => item.id}
           renderItem={renderTerminalItem}
-          extraData={terminalFocusRow}
+          extraData={selectFocusRow}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -285,6 +334,47 @@ const styles = StyleSheet.create({
     color: Colors.TextMuted,
     fontSize: Typography.sizes.sm,
     textAlign: 'center',
+  },
+
+  rotationToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: Spacing.md,
+    marginBottom: Spacing.md,
+    padding: Spacing.md,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.Surface,
+    borderWidth: 2,
+    borderColor: Colors.Border,
+    gap: Spacing.md,
+  },
+  rotationToggleFocused: { borderColor: Colors.TextPrimary },
+  rotationToggleLabel: {
+    color: Colors.TextPrimary,
+    fontSize: Typography.sizes.base,
+    fontWeight: Typography.weights.semibold,
+  },
+  rotationToggleHint: {
+    color: Colors.TextMuted,
+    fontSize: Typography.sizes.xs,
+    marginTop: 2,
+  },
+  rotationToggleSwitch: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.SurfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.Border,
+  },
+  rotationToggleSwitchOn: {
+    backgroundColor: Colors.Primary,
+    borderColor: Colors.Primary,
+  },
+  rotationToggleSwitchText: {
+    color: Colors.TextPrimary,
+    fontSize: Typography.sizes.xs,
+    fontWeight: Typography.weights.semibold,
   },
 
   list: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xl },

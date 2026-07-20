@@ -42,6 +42,22 @@ export async function clearTerminal(): Promise<void> {
   ]);
 }
 
+// ─── Rotação simulada (por aparelho) ──────────────────────────────────────────
+// Algumas TV boxes genéricas não conseguem girar a saída HDMI de verdade e
+// precisam simular retrato via transform (ver RotatedViewport). Celulares e
+// a maioria dos aparelhos giram nativamente e NÃO devem usar esse modo — por
+// isso é uma opção local por dispositivo (ativada manualmente no menu oculto
+// do instalador), não um comportamento fixo pra todo mundo.
+
+export async function getSimulateRotation(): Promise<boolean> {
+  const value = await AsyncStorage.getItem(STORAGE_KEYS.SIMULATE_ROTATION);
+  return value === 'true';
+}
+
+export async function setSimulateRotation(enabled: boolean): Promise<void> {
+  await AsyncStorage.setItem(STORAGE_KEYS.SIMULATE_ROTATION, enabled ? 'true' : 'false');
+}
+
 // ─── Group Indices ────────────────────────────────────────────────────────────
 
 export async function saveGroupIndices(

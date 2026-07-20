@@ -15,4 +15,5 @@ export const STORAGE_KEYS = {
   GROUP_INDICES: 'iron_screens_group_indices',
   PLAYLIST_CACHE: (terminalId: string) => `iron_screens_playlist_cache_${terminalId}`,
   DEVICE_ID: 'iron_screens_device_id',
+  SIMULATE_ROTATION: 'iron_screens_simulate_rotation',
 };

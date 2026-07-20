@@ -61,5 +61,6 @@
       </intent-filter>
     </receiver>
     <service android:name=".BootForegroundService" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
+    <service android:name=".OverlayKeepAliveService" android:enabled="true" android:exported="false"/>
   </application>
 </manifest>

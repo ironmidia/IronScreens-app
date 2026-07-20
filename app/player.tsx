@@ -13,7 +13,13 @@ import {
 import { useRouter } from "expo-router";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useKeepAwake } from "@/hooks/useKeepAwake";
-import { loadTerminal, saveTerminal, clearTerminal } from "@/services/storageService";
+import {
+  loadTerminal,
+  saveTerminal,
+  clearTerminal,
+  getSimulateRotation,
+  setSimulateRotation,
+} from "@/services/storageService";
 import { fetchTerminalById } from "@/services/terminalService";
 import { usePlayer } from "@/hooks/usePlayer";
 import { useFooterBar } from "@/hooks/useFooterBar";
@@ -34,13 +40,24 @@ import { supabase } from "@/services/supabase";
 import { captureRef } from "react-native-view-shot";
 import { PlaybackItem } from "@/services/models";
 
-// ─── Muitas TV boxes genéricas não conseguem girar a saída HDMI de verdade
-// (o hardware fica travado em paisagem independente do que o app pede). Por
-// isso o sistema operacional fica sempre travado em paisagem — terminais
-// "verticais"/"híbridos" são simulados girando só o conteúdo do app dentro
-// desse frame (ver RotatedViewport), não a tela do sistema.
-async function applyOrientation(_orientation: string) {
-  await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+// ─── Algumas TV boxes genéricas não conseguem girar a saída HDMI de verdade
+// (o hardware fica travado em paisagem independente do que o app pede) —
+// nesses aparelhos específicos (opt-in via menu oculto, ver
+// services/storageService.ts), o SO fica sempre travado em paisagem e
+// terminais "verticais"/"híbridos" são simulados girando só o conteúdo do
+// app (ver RotatedViewport). Na maioria dos aparelhos (celulares, Android TV
+// de verdade) a rotação nativa funciona bem e deve continuar sendo usada.
+async function applyOrientation(orientation: string, simulateRotation: boolean) {
+  if (simulateRotation) {
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    return;
+  }
+
+  if (orientation === "vertical" || orientation === "hybrid") {
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT);
+  } else {
+    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+  }
 }
 
 const VIDEO_EVENT_TYPES = ["video", "youtube", "instagram"];
@@ -96,6 +113,7 @@ interface HybridSlotProps {
   revision: number;
   slotIndex: number;
   transitionImageUrl: string | null;
+  simulateRotation: boolean;
   onVideoEnd: () => void;
   onPressIn: () => void;
   onPressOut: () => void;
@@ -106,6 +124,7 @@ function HybridSlot({
   revision,
   slotIndex,
   transitionImageUrl,
+  simulateRotation,
   onVideoEnd,
   onPressIn,
   onPressOut,
@@ -128,6 +147,7 @@ function HybridSlot({
             durationSec={item.durationSec}
             transitionImageUrl={transitionImageUrl}
             onVideoEnd={onVideoEnd}
+            rotated={simulateRotation}
           />
         </CrossfadeView>
       )}
@@ -135,14 +155,17 @@ function HybridSlot({
   );
 }
 
-function TransitionImageOverlay({
-  visible,
-  imageUrl,
-}: {
-  visible: boolean;
-  imageUrl: string | null;
-}) {
-  if (!visible || !imageUrl) return null;
+// ─── Fundo permanente atrás de todo o conteúdo (não só durante loading).
+// O flash de tela preta entre um loop e outro (ou entre itens) acontece
+// porque o MediaRenderer remonta a cada troca — vídeo/imagem novos levam um
+// instante pra decodificar o primeiro frame, e nesse intervalo o que
+// aparece é só o fundo preto do container. Em vez de tentar prever o exato
+// momento desse gap, deixamos essa imagem sempre desenhada por trás (zIndex
+// baixo) — ela só fica visível quando o conteúdo em cima está mesmo
+// transparente/ainda carregando, preenchendo o gap sem precisar de lógica
+// de "mostrar/esconder" separada.
+function TransitionBackdrop({ imageUrl }: { imageUrl: string | null }) {
+  if (!imageUrl) return null;
 
   return (
     <View pointerEvents="none" style={styles.transitionOverlay}>
@@ -164,6 +187,10 @@ export default function PlayerScreen() {
   const [terminalName, setTerminalName] = useState<string | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [ready, setReady] = useState(false);
+  // ─── Rotação simulada é opt-in por aparelho (ver services/storageService.ts).
+  // Default false: a maioria dos aparelhos (celulares, boxes Android TV de
+  // verdade) gira nativamente e não deve usar o truque de transform.
+  const [simulateRotation, setSimulateRotationState] = useState(false);
 
   const rootViewRef = useRef<View | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -179,10 +206,11 @@ export default function PlayerScreen() {
   const footerHeight = footerConfig ? BAR_HEIGHT : 0;
 
   const isVerticalTerminal = terminalOrientation === "vertical" || terminalOrientation === "hybrid";
+  const shouldSimulateRotation = isVerticalTerminal && simulateRotation;
   // ─── PlayerScreen fica FORA do RotatedViewport (é ele quem o renderiza),
   // então não pode usar o Context de rotação aqui — calcula direto.
   const rawWindow = useWindowDimensions();
-  const logicalWindow = isVerticalTerminal
+  const logicalWindow = shouldSimulateRotation
     ? { width: rawWindow.height, height: rawWindow.width }
     : rawWindow;
   const isHorizontalTerminal = terminalOrientation === "horizontal";
@@ -204,6 +232,9 @@ export default function PlayerScreen() {
       }
 
       setTerminalId(tid);
+
+      const simulateRotationFlag = await getSimulateRotation();
+      setSimulateRotationState(simulateRotationFlag);
 
       // ─── A orientação cacheada localmente só reflete o que era verdade no
       // momento do setup. Se o admin mudou a orientação do terminal depois
@@ -239,7 +270,7 @@ export default function PlayerScreen() {
 
       setTerminalOrientation(resolvedOrientation);
       setTerminalName(resolvedName);
-      await applyOrientation(resolvedOrientation);
+      await applyOrientation(resolvedOrientation, simulateRotationFlag);
       setReady(true);
     }
 
@@ -285,8 +316,7 @@ export default function PlayerScreen() {
   if (currentItem) lastItemRef.current = currentItem;
   const displayItem = currentItem ?? lastItemRef.current;
 
-  const showTransitionImage =
-    transitionImageEnabled && !!transitionImageUrl && (loading || !displayItem);
+  const backdropImageUrl = transitionImageEnabled ? transitionImageUrl : null;
 
   const advanceRef = useRef(playerActions.advance);
   useEffect(() => {
@@ -492,6 +522,15 @@ export default function PlayerScreen() {
     playerActions.reload();
   }, [playerActions]);
 
+  const handleToggleSimulateRotation = useCallback(
+    async (next: boolean) => {
+      setSimulateRotationState(next);
+      await setSimulateRotation(next);
+      await applyOrientation(terminalOrientation, next);
+    },
+    [terminalOrientation],
+  );
+
   if (!ready || !terminalId) {
     return <View style={styles.root} />;
   }
@@ -510,8 +549,10 @@ export default function PlayerScreen() {
     const slotHeight = Math.floor(contentHeight / 2);
 
     return (
-      <RotatedViewport rotate={isVerticalTerminal}>
+      <RotatedViewport rotate={shouldSimulateRotation}>
         <View ref={rootViewRef} style={styles.root}>
+          <TransitionBackdrop imageUrl={backdropImageUrl} />
+
           <ConnectionBanner visible={!isConnected} />
 
           <View
@@ -522,6 +563,7 @@ export default function PlayerScreen() {
               revision={slot1Revision}
               slotIndex={1}
               transitionImageUrl={transitionImageUrl}
+              simulateRotation={shouldSimulateRotation}
               onVideoEnd={handleSlot1VideoEnd}
               onPressIn={handlePressIn}
               onPressOut={handlePressOut}
@@ -541,16 +583,12 @@ export default function PlayerScreen() {
               revision={slot2Revision}
               slotIndex={2}
               transitionImageUrl={transitionImageUrl}
+              simulateRotation={shouldSimulateRotation}
               onVideoEnd={handleSlot2VideoEnd}
               onPressIn={handlePressIn}
               onPressOut={handlePressOut}
             />
           </View>
-
-          <TransitionImageOverlay
-            visible={showTransitionImage}
-            imageUrl={transitionImageUrl}
-          />
 
           {footerConfig && <FooterBar config={footerConfig} />}
 
@@ -558,9 +596,11 @@ export default function PlayerScreen() {
             visible={menuVisible}
             terminalName={terminalName || "Terminal"}
             terminalId={terminalId}
+            simulateRotation={simulateRotation}
             onClose={() => setMenuVisible(false)}
             onChangeTerminal={handleChangeTerminal}
             onReload={handleReload}
+            onToggleSimulateRotation={handleToggleSimulateRotation}
           />
         </View>
       </RotatedViewport>
@@ -568,8 +608,10 @@ export default function PlayerScreen() {
   }
 
   return (
-    <RotatedViewport rotate={isVerticalTerminal}>
+    <RotatedViewport rotate={shouldSimulateRotation}>
       <View ref={rootViewRef} style={styles.root}>
+        <TransitionBackdrop imageUrl={backdropImageUrl} />
+
         <ConnectionBanner visible={!isConnected} />
 
         <Pressable
@@ -590,16 +632,12 @@ export default function PlayerScreen() {
                 media={displayItem.media}
                 durationSec={displayItem.durationSec}
                 transitionImageUrl={transitionImageUrl}
+                rotated={shouldSimulateRotation}
                 onVideoEnd={handleVideoEnd}
               />
             </CrossfadeView>
           )}
         </Pressable>
-
-        <TransitionImageOverlay
-          visible={showTransitionImage}
-          imageUrl={transitionImageUrl}
-        />
 
         {footerConfig && <FooterBar config={footerConfig} />}
 
@@ -607,9 +645,11 @@ export default function PlayerScreen() {
           visible={menuVisible}
           terminalName={terminalName || "Terminal"}
           terminalId={terminalId}
+          simulateRotation={simulateRotation}
           onClose={() => setMenuVisible(false)}
           onChangeTerminal={handleChangeTerminal}
           onReload={handleReload}
+          onToggleSimulateRotation={handleToggleSimulateRotation}
         />
       </View>
     </RotatedViewport>
@@ -658,7 +698,12 @@ const styles = StyleSheet.create({
   },
   transitionOverlay: {
     ...StyleSheet.absoluteFillObject,
-    zIndex: 40,
+    // ─── Sem zIndex explícito de propósito: como é o PRIMEIRO filho no JSX
+    // e os irmãos (ConnectionBanner, Pressable, FooterBar, HiddenMenu) não
+    // têm zIndex próprio, a ordem de pintura já garante que fica atrás.
+    // Misturar zIndex negativo aqui com irmãos sem zIndex definido é
+    // inconsistente entre versões do Android/RN — mais seguro depender só
+    // da ordem do JSX.
     backgroundColor: "#000",
   },
 

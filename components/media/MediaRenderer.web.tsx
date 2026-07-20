@@ -12,12 +12,14 @@ interface MediaRendererProps {
   media: Media;
   transitionImageUrl?: string | null;
   onVideoEnd?: () => void;
+  rotated?: boolean;
 }
 
 function MediaRenderer({
   media,
   transitionImageUrl,
   onVideoEnd,
+  rotated,
 }: MediaRendererProps) {
   switch (media.type) {
     case 'image':
@@ -38,7 +40,7 @@ function MediaRenderer({
 
     case 'video':
       if (!media.file_url) return <View style={styles.black} />;
-      return <VideoRenderer uri={media.file_url} onEnd={onVideoEnd} />;
+      return <VideoRenderer uri={media.file_url} onEnd={onVideoEnd} rotated={rotated} />;
 
     case 'youtube': {
       if (!media.external_url) return <View style={styles.black} />;
@@ -64,7 +66,7 @@ function MediaRenderer({
 const styles = StyleSheet.create({
   black: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: 'transparent',
   },
 });
 

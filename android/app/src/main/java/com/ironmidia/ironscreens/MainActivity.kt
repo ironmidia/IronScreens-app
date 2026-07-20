@@ -25,6 +25,17 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+
+    // ─── Mantém uma janelinha de overlay ativa (ver OverlayKeepAliveService)
+    // pra contar como "app com janela visível" e não ser bloqueado pela
+    // restrição de background activity start do Android 10+ quando
+    // onUserLeaveHint() tenta se relançar após Home/Recentes. No-op se a
+    // permissão de sobreposição não estiver concedida.
+    try {
+      startService(Intent(this, OverlayKeepAliveService::class.java))
+    } catch (e: Exception) {
+      // Ignora — pior caso é o app não conseguir se relançar sozinho.
+    }
   }
 
   /**

@@ -24,7 +24,10 @@ function ImageRenderer({ uri }: ImageRendererProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    // ─── Transparente (não preto) pra deixar o backdrop de transição do
+    // player (app/player.tsx) aparecer durante o instante em que a imagem
+    // ainda está decodificando, em vez de mostrar um flash de tela preta.
+    backgroundColor: 'transparent',
   },
   image: {
     flex: 1,

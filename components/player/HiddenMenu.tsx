@@ -9,6 +9,7 @@ import {
   Dimensions,
   Alert,
   Platform,
+  Switch,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -21,18 +22,22 @@ interface HiddenMenuProps {
   visible: boolean;
   terminalName: string | null;
   terminalId: string | null;
+  simulateRotation: boolean;
   onClose: () => void;
   onChangeTerminal: () => void;
   onReload: () => void;
+  onToggleSimulateRotation: (next: boolean) => void;
 }
 
 function HiddenMenu({
   visible,
   terminalName,
   terminalId,
+  simulateRotation,
   onClose,
   onChangeTerminal,
   onReload,
+  onToggleSimulateRotation,
 }: HiddenMenuProps) {
   const handleChangeTerminal = useCallback(() => {
     onClose();
@@ -112,6 +117,22 @@ function HiddenMenu({
             <MaterialIcons name="swap-horiz" size={20} color={Colors.TextPrimary} />
             <Text style={styles.menuItemText}>Trocar Terminal</Text>
           </Pressable>
+
+          <View style={styles.divider} />
+
+          <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toggleLabel}>Rotação simulada</Text>
+              <Text style={styles.toggleHint}>
+                Ative só se essa caixa não gira a tela sozinha
+              </Text>
+            </View>
+            <Switch
+              value={simulateRotation}
+              onValueChange={onToggleSimulateRotation}
+              trackColor={{ true: Colors.Primary }}
+            />
+          </View>
 
           <View style={styles.divider} />
 
@@ -198,6 +219,22 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     textAlign: 'center',
     marginTop: Spacing.xs,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+  },
+  toggleLabel: {
+    color: Colors.TextPrimary,
+    fontSize: Typography.sizes.sm,
+    fontWeight: Typography.weights.medium,
+  },
+  toggleHint: {
+    color: Colors.TextMuted,
+    fontSize: Typography.sizes.xs,
+    marginTop: 2,
   },
 });
 
