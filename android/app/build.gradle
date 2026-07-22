@@ -87,6 +87,18 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
+    // ─── Força uma versão mais nova do CMake (que vem com um Ninja mais
+    // novo, com suporte a caminhos longos no Windows). O Ninja 1.10.2
+    // (bundled com o CMake 3.22.1, o único instalado antes) ignora o
+    // registro do Windows (LongPathsEnabled) e falha em builds locais no
+    // Windows por causa dos caminhos gerados pelo codegen do
+    // react-native-keyboard-controller passarem de 260 caracteres.
+    externalNativeBuild {
+        cmake {
+            version "4.1.2"
+        }
+    }
+
     namespace 'com.ironmidia.ironscreens'
     defaultConfig {
         applicationId 'com.ironmidia.ironscreens'
@@ -96,6 +108,32 @@ android {
         versionName "1.0.0"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+
+        // ─── O NDK/AGP habilita ThinLTO (-flto=thin) por padrão nessa
+        // combinação de versões (parte do suporte a página de 16KB), mas o
+        // @react-native-picker/picker não tem "key function" definida nas
+        // classes de Props geradas pelo codegen — sem isso, o linker (lld)
+        // não sabe em qual objeto emitir a vtable sob LTO, e o link final
+        // falha com "undefined symbol: vtable/VTT for ...Props". Desativa
+        // o LTO explicitamente pra contornar (o flag adicionado por último
+        // vence sobre o -flto=thin injetado antes pelo AGP).
+        externalNativeBuild {
+            cmake {
+                cppFlags "-fno-lto"
+                cFlags "-fno-lto"
+                // ─── "-fno-lto" sozinho não vence porque o "-flto=thin" é
+                // inserido DEPOIS pelo próprio CMake/AGP na linha de link
+                // (via a propriedade INTERPROCEDURAL_OPTIMIZATION, não um
+                // cppFlag comum) — desliga a propriedade diretamente.
+                arguments "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF",
+                          "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG=OFF",
+                          "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=OFF",
+                          // AGP usa a config "RelWithDebInfo" do CMake pro build type
+                          // "release" do Gradle por padrão — sem essa variante específica
+                          // aqui, o -flto=thin continuava passando nesse build.
+                          "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO=OFF"
+            }
+        }
     }
     signingConfigs {
         debug {

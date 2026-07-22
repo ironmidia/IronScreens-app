@@ -408,6 +408,7 @@ export default function PlayerScreen() {
     currentItem?.playlistItemId,
     currentItem?.durationSec,
     playbackRevision,
+    cycleTick,
   ]);
 
   // ── Timer Slot 1 (híbrido) ────────────────────────────────────────────────
@@ -522,6 +523,10 @@ export default function PlayerScreen() {
     playerActions.reload();
   }, [playerActions]);
 
+  const handleDebugRotation = useCallback(() => {
+    router.push("/debug-rotation");
+  }, [router]);
+
   const handleToggleSimulateRotation = useCallback(
     async (next: boolean) => {
       setSimulateRotationState(next);
@@ -601,6 +606,7 @@ export default function PlayerScreen() {
             onChangeTerminal={handleChangeTerminal}
             onReload={handleReload}
             onToggleSimulateRotation={handleToggleSimulateRotation}
+            onDebugRotation={handleDebugRotation}
           />
         </View>
       </RotatedViewport>
@@ -650,6 +656,7 @@ export default function PlayerScreen() {
           onChangeTerminal={handleChangeTerminal}
           onReload={handleReload}
           onToggleSimulateRotation={handleToggleSimulateRotation}
+          onDebugRotation={handleDebugRotation}
         />
       </View>
     </RotatedViewport>

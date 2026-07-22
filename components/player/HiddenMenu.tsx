@@ -27,6 +27,7 @@ interface HiddenMenuProps {
   onChangeTerminal: () => void;
   onReload: () => void;
   onToggleSimulateRotation: (next: boolean) => void;
+  onDebugRotation?: () => void;
 }
 
 function HiddenMenu({
@@ -38,6 +39,7 @@ function HiddenMenu({
   onChangeTerminal,
   onReload,
   onToggleSimulateRotation,
+  onDebugRotation,
 }: HiddenMenuProps) {
   const handleChangeTerminal = useCallback(() => {
     onClose();
@@ -133,6 +135,22 @@ function HiddenMenu({
               trackColor={{ true: Colors.Primary }}
             />
           </View>
+
+          {onDebugRotation && (
+            <>
+              <View style={styles.divider} />
+              <Pressable
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+                onPress={() => {
+                  onClose();
+                  setTimeout(onDebugRotation, 200);
+                }}
+              >
+                <MaterialIcons name="bug-report" size={20} color={Colors.TextPrimary} />
+                <Text style={styles.menuItemText}>Teste de Rotação</Text>
+              </Pressable>
+            </>
+          )}
 
           <View style={styles.divider} />
 

@@ -178,6 +178,23 @@ export async function syncPlaylistMediaCache(
     }
   }
 
+  // ─── Itens que saíram da playlist (removidos ou trocados) precisam ter o
+  // ARQUIVO em disco apagado também, não só a entrada do manifesto — sem
+  // isso, cada mídia removida ao longo do tempo ficava ocupando espaço no
+  // aparelho pra sempre, "rodando offline" mesmo depois de retirada.
+  const staleItems = manifest.items.filter((item) => {
+    const key = `${item.playlistItemId}:${item.mediaId}`;
+    return !validKeys.has(key);
+  });
+
+  await Promise.all(
+    staleItems.map((item) =>
+      FileSystem.deleteAsync(item.localUri, { idempotent: true }).catch((error) => {
+        console.warn("[Cache] Falha ao remover mídia órfã:", item.localUri, error);
+      }),
+    ),
+  );
+
   const nextItems = manifest.items.filter((item) => {
     const key = `${item.playlistItemId}:${item.mediaId}`;
     return validKeys.has(key);

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import * as Network from "expo-network";
 import { PlaybackItem, Media, MediaGroup, MediaGroupItem } from "@/services/models";
 import {
@@ -546,6 +547,28 @@ export function usePlayer(
     return () => { setTerminalOffline(terminalId).catch(() => {}); };
   }, [terminalId]);
 
+  // ─── Quando o app sai do primeiro plano (Home, ou a sobreposição do
+  // kiosk assumindo por cima) e volta, o Android costuma pausar/matar a
+  // decodificação de vídeo e pode até destruir a Surface do player nativo
+  // — ao voltar, a mídia que estava tocando ficava com a última imagem
+  // congelada na tela, sem nunca mais avançar (o timer/callback de fim de
+  // vídeo dependia de eventos que já não iam mais disparar naquela
+  // instância). Força um remount da mídia atual (cycleTick) assim que o
+  // app volta a ficar ativo, pra ela recomeçar do zero em vez de ficar
+  // presa num estado morto.
+  const appStateRef = useRef(AppState.currentState);
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next: AppStateStatus) => {
+      const prev = appStateRef.current;
+      appStateRef.current = next;
+      if (next === "active" && prev !== "active") {
+        console.log("[Player] App voltou ao primeiro plano — reiniciando mídia atual");
+        setCycleTick((t) => t + 1);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
   const advance = useCallback(async () => {
     const list = playlistRef.current;
     if (!list.length) return;
@@ -596,11 +619,27 @@ export function usePlayer(
 
     const nextIndex = (currentIndexRef.current + 1) % workingList.length;
 
+    console.log(
+      `[Player] advance(): saindo de "${current?.media.name ?? "?"}" (${current?.media.type ?? "?"}) -> índice ${nextIndex}`,
+    );
+    if (nextIndex === 0) {
+      console.log(
+        `[Player] Loop completo — reiniciando playlist do início (${workingList.length} itens) em`,
+        new Date().toISOString(),
+      );
+    }
+
     // ─── FIX: resolve o próximo item ANTES de atualizar o estado.
     // Assim o setCurrentItem e setCurrentIndex disparam no mesmo batch
     // do React, sem nenhum frame intermediário com item=null.
     const nextItem = resolveItem(workingList, nextIndex);
     currentIndexRef.current = nextIndex;
+
+    console.log(
+      nextItem
+        ? `[Player] Entrando em "${nextItem.media.name}" (${nextItem.media.type}), duração ${nextItem.durationSec ?? "?"}s`
+        : "[Player] Nenhum item agendado no índice atual — tela ficará vazia",
+    );
 
     // Atualiza item e índice de forma síncrona no mesmo ciclo de render
     setCurrentItem(nextItem);

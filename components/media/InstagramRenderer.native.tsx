@@ -3,14 +3,26 @@
 // Duração: o renderer aguarda o fim natural do vídeo via evento 'ended'
 // do elemento <video> e então chama onEnd().
 // O player.tsx NÃO arma timer para type=instagram — ver VIDEO_EVENT_TYPES.
-import React, { memo, useCallback, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { WebView, WebViewMessageEvent } from 'react-native-webview';
+import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview';
 
-const TV_UA =
-  'Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) ' +
-  'AppleWebKit/538.1 (KHTML, like Gecko) ' +
-  'Version/6.0 TV Safari/538.1';
+// ─── Watchdog de segurança: sem isso, se o evento 'ended' do vídeo nunca
+// disparar (embed que não carrega, autoplay bloqueado, post do Instagram
+// removido/privado, etc.), o item nunca avançava — o player.tsx não arma
+// timer nenhum pra type=instagram, então travava pra sempre, sem recovery.
+const WATCHDOG_MS = 120000;
+
+// ─── Diferente do YouTube, o Instagram parece tratar o user-agent forjado
+// de Smart TV como tráfego suspeito depois de vários embeds recarregados
+// em loop no mesmo aparelho, e passa a devolver a tela de LOGIN normal do
+// Instagram em vez do embed do post — foi exatamente isso que apareceu
+// travado na tela depois de rodar o loop por um tempo. Um user-agent de
+// navegador de celular comum é bem menos propenso a acionar essa defesa.
+const MOBILE_UA =
+  'Mozilla/5.0 (Linux; Android 13; SM-G991B) ' +
+  'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/124.0.0.0 Mobile Safari/537.36';
 
 function toEmbedUrl(uri: string): string {
   try {
@@ -129,23 +141,81 @@ function InstagramRenderer({ uri, onEnd }: InstagramRendererProps) {
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
   const endCalledRef = useRef(false);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loginDetectedRef = useRef(false);
 
   const embedUrl = toEmbedUrl(uri);
 
+  const triggerEnd = useCallback(() => {
+    if (endCalledRef.current) return;
+    endCalledRef.current = true;
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current);
+      watchdogRef.current = null;
+    }
+    onEndRef.current?.();
+  }, []);
+
+  // ─── Detecta quando o WebView é redirecionado pra fora do embed (ex:
+  // .../accounts/login/ ou .../challenge/), o que indica que o Instagram
+  // bloqueou o embed em vez de mostrar o post. Sem isso, ficava preso
+  // mostrando a tela de login pro resto da sessão (o watchdog de 2min ainda
+  // avançaria eventualmente, mas só depois de ficar visível esse tempo
+  // todo). Avança direto assim que detecta.
+  const onNavigationStateChange = useCallback((nav: WebViewNavigation) => {
+    if (loginDetectedRef.current || endCalledRef.current) return;
+    const isLoginWall =
+      /\/accounts\/login/.test(nav.url) ||
+      /\/challenge/.test(nav.url) ||
+      /\/accounts\/emailsignup/.test(nav.url);
+    if (isLoginWall) {
+      loginDetectedRef.current = true;
+      console.warn('[InstagramRenderer] Redirecionado pra tela de login, avançando:', nav.url);
+      triggerEnd();
+    }
+  }, [triggerEnd]);
+
+  useEffect(() => {
+    console.log('[InstagramRenderer] Montando:', embedUrl);
+    endCalledRef.current = false;
+    loginDetectedRef.current = false;
+
+    if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    console.log('[InstagramRenderer] Watchdog armado:', WATCHDOG_MS, 'ms');
+    watchdogRef.current = setTimeout(() => {
+      console.warn('[InstagramRenderer] Watchdog disparou, avançando');
+      triggerEnd();
+    }, WATCHDOG_MS);
+
+    return () => {
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+    };
+  }, [embedUrl, triggerEnd]);
+
   const onMessage = useCallback((e: WebViewMessageEvent) => {
     if (e.nativeEvent.data === 'ENDED' && !endCalledRef.current) {
-      endCalledRef.current = true;
-      onEndRef.current?.();
+      console.log('[InstagramRenderer] ENDED recebido');
+      triggerEnd();
     }
+  }, [triggerEnd]);
+
+  const onError = useCallback((e: any) => {
+    console.error('[InstagramRenderer] Erro no WebView:', e?.nativeEvent);
   }, []);
 
   return (
     <View style={styles.container}>
       <WebView
         source={{ uri: embedUrl }}
-        userAgent={TV_UA}
+        userAgent={MOBILE_UA}
         style={styles.webview}
         onMessage={onMessage}
+        onError={onError}
+        onHttpError={onError}
+        onNavigationStateChange={onNavigationStateChange}
         injectedJavaScriptBeforeContentLoaded={INJECTED_JS_BEFORE}
         injectedJavaScript={INJECTED_JS_BEFORE}
         mediaPlaybackRequiresUserAction={false}

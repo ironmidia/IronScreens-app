@@ -79,6 +79,24 @@ const HIDE_CSS = `
     visibility: hidden !important;
   }
 
+  /* ─── "Lista branca" em vez de "lista negra": em vez de tentar adivinhar
+     o nome de cada elemento de UI (barra de progresso, título, setas de
+     navegação do Shorts, botões de like/inscrever etc.), esconde TUDO que
+     for filho direto do player além do próprio vídeo. Cobre qualquer
+     elemento de UI novo/desconhecido (inclusive o overlay específico do
+     Shorts) de uma vez, sem depender de listar cada classe. */
+  #movie_player > *:not(.html5-video-container):not(video),
+  .html5-video-player > *:not(.html5-video-container):not(video),
+  .html5-video-container > *:not(video) {
+    display: none !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+  }
+
   html, body {
     background: #000 !important;
     margin: 0 !important;
@@ -141,19 +159,42 @@ const BEFORE_JS = `
     return s;
   }
 
+  function hideEl(el) {
+    el.style.setProperty('display', 'none', 'important');
+    el.style.setProperty('height', '0', 'important');
+    el.style.setProperty('max-height', '0', 'important');
+    el.style.setProperty('overflow', 'hidden', 'important');
+    el.style.setProperty('opacity', '0', 'important');
+    el.style.setProperty('pointer-events', 'none', 'important');
+    el.style.setProperty('visibility', 'hidden', 'important');
+  }
+
   // ── Aplica estilos inline diretamente nos elementos encontrados ──────────────
   // Mais difícil de sobrescrever do que uma regra CSS porque tem especificidade máxima.
   function applyInline() {
     var els = document.querySelectorAll(SELECTORS);
-    for (var i = 0; i < els.length; i++) {
-      var el = els[i];
-      el.style.setProperty('display', 'none', 'important');
-      el.style.setProperty('height', '0', 'important');
-      el.style.setProperty('max-height', '0', 'important');
-      el.style.setProperty('overflow', 'hidden', 'important');
-      el.style.setProperty('opacity', '0', 'important');
-      el.style.setProperty('pointer-events', 'none', 'important');
-      el.style.setProperty('visibility', 'hidden', 'important');
+    for (var i = 0; i < els.length; i++) hideEl(els[i]);
+
+    // ─── Reforça a "lista branca": esconde qualquer filho direto do player
+    // que não seja o próprio vídeo (ou o container dele), pego pelo nome
+    // real do elemento em vez de uma classe fixa — cobre UI nova/desconhecida
+    // (ex: setas de navegação do Shorts) que a lista de seletores acima
+    // ainda não conhece.
+    var players = document.querySelectorAll('#movie_player, .html5-video-player');
+    for (var p = 0; p < players.length; p++) {
+      var kids = players[p].children;
+      for (var k = 0; k < kids.length; k++) {
+        var kid = kids[k];
+        if (kid.tagName === 'VIDEO' || kid.classList.contains('html5-video-container')) continue;
+        hideEl(kid);
+      }
+    }
+    var containers = document.querySelectorAll('.html5-video-container');
+    for (var c = 0; c < containers.length; c++) {
+      var vKids = containers[c].children;
+      for (var v = 0; v < vKids.length; v++) {
+        if (vKids[v].tagName !== 'VIDEO') hideEl(vKids[v]);
+      }
     }
   }
 
@@ -319,6 +360,17 @@ function YoutubeRenderer({
           typeof msg.value === "number" &&
           msg.value > 0
         ) {
+          // ─── Mesmo motivo do guard de TIME: uma duração minúscula/
+          // transitória reportada antes dos metadados reais carregarem
+          // "travava" aqui (durationArmedRef só aceita a primeira vinda),
+          // armando um watchdog quase instantâneo e avançando o vídeo cedo
+          // demais. Ignora valores implausíveis e espera uma duração real.
+          const MIN_PLAUSIBLE_DURATION_SEC = 5;
+          if (msg.value < MIN_PLAUSIBLE_DURATION_SEC) {
+            console.log("[YoutubeRenderer] DURATION ignorada (implausível):", msg.value, "s");
+            return;
+          }
+
           console.log("[YoutubeRenderer] Duração real:", msg.value, "s");
 
           if (!durationArmedRef.current) {
@@ -362,8 +414,25 @@ function YoutubeRenderer({
           typeof msg.duration === "number" &&
           msg.duration > 0
         ) {
+          // ─── Logo no início da reprodução, antes dos metadados reais
+          // carregarem, o <video> às vezes reporta uma "duration" minúscula/
+          // transitória. Se isso coincidir com qualquer buffering inicial
+          // (currentTime já > 0), a checagem "perto do fim" batia na hora,
+          // disparando um avanço falso que remontava o player do zero —
+          // o vídeo "tocava um pouco e voltava a carregar" de novo. Exige
+          // uma duração minimamente plausível antes de confiar nela.
+          const MIN_PLAUSIBLE_DURATION_SEC = 5;
+          if (msg.duration < MIN_PLAUSIBLE_DURATION_SEC) {
+            console.log(
+              "[YoutubeRenderer] TIME ignorado (duração implausível):",
+              msg.value, "/", msg.duration,
+            );
+            return;
+          }
           if (msg.value >= msg.duration - 0.5) {
-            console.log("[YoutubeRenderer] TIME perto do fim");
+            console.log(
+              "[YoutubeRenderer] TIME perto do fim:", msg.value, "/", msg.duration,
+            );
             triggerEnd();
           }
         }

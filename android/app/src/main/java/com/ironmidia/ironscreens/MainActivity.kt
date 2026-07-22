@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import android.widget.EditText
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -110,17 +111,40 @@ class MainActivity : ReactActivity() {
   private val DPAD_EVENT_NAME = "IronScreensDpadEvent"
 
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-    if (event.action == KeyEvent.ACTION_DOWN) {
-      val keyName = when (event.keyCode) {
-        KeyEvent.KEYCODE_DPAD_UP -> "UP"
-        KeyEvent.KEYCODE_DPAD_DOWN -> "DOWN"
-        KeyEvent.KEYCODE_DPAD_LEFT -> "LEFT"
-        KeyEvent.KEYCODE_DPAD_RIGHT -> "RIGHT"
-        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> "SELECT"
-        else -> null
-      }
-      if (keyName != null) emitDpadEvent(keyName)
+    // ─── Quando o foco está num campo de texto nativo (ex: o PIN do
+    // terminal), deixa o Android tratar a tecla do jeito normal dele —
+    // é esse comportamento padrão (clique/OK abrindo o teclado, setas
+    // movendo o cursor) que fica quebrado se a gente consumir o evento
+    // aqui. A correção do toggle duplicado (ver comentário abaixo) só
+    // vale pra quando o foco está em outro tipo de elemento (Pressable).
+    if (currentFocus is EditText) {
+      return super.dispatchKeyEvent(event)
     }
+
+    val keyName = when (event.keyCode) {
+      KeyEvent.KEYCODE_DPAD_UP -> "UP"
+      KeyEvent.KEYCODE_DPAD_DOWN -> "DOWN"
+      KeyEvent.KEYCODE_DPAD_LEFT -> "LEFT"
+      KeyEvent.KEYCODE_DPAD_RIGHT -> "RIGHT"
+      KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> "SELECT"
+      else -> null
+    }
+
+    if (keyName != null) {
+      // ─── Consome o evento por completo (não repassa pro super) em vez de
+      // só notificar o JS e deixar o Android também processar. Views focáveis
+      // nativamente (como os Pressable, que ficam focáveis nessa combinação
+      // de RN/Android mesmo sem pedir) respondem ao DPAD_CENTER/ENTER com um
+      // "clique" automático do próprio sistema, disparando o onPress do
+      // elemento em foco JUNTO com a nossa ponte — o toggle de rotação
+      // simulada (e qualquer outro Pressable numa grade D-pad) acabava sendo
+      // acionado duas vezes por um único aperto (liga, depois desliga na
+      // sequência). Consumir aqui garante uma única fonte de verdade: só a
+      // nossa navegação em JS decide o que "OK" faz.
+      if (event.action == KeyEvent.ACTION_DOWN) emitDpadEvent(keyName)
+      return true
+    }
+
     return super.dispatchKeyEvent(event)
   }
 

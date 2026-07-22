@@ -78,6 +78,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="setup" />
         <Stack.Screen name="player" />
+        <Stack.Screen name="debug-rotation" />
         <Stack.Screen name="terminals" />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
